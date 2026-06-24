@@ -1,0 +1,4 @@
+echo "scheduler_process" >> .gitignore
+echo "pacman_process" >> .gitignore
+echo "enemy_process" >> .gitignore
+echo "renderer_process" >> .gitignore
