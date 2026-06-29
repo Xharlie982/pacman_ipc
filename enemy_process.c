@@ -85,6 +85,9 @@ void* p2_ghost_thread(void* arg) {
                         pthread_mutex_lock(&shm->mutex_ghost_state);
                         shm->ghost_old_x[id] = ghost_old_positions[id].x; shm->ghost_old_y[id] = ghost_old_positions[id].y;
                         shm->ghost_x[id] = ghost_positions[id].x; shm->ghost_y[id] = ghost_positions[id].y;
+                        for(volatile int k=0; k<100000; k++) {
+                            shm->stress_counter++;
+                        }
                         
                         append_history(shm->ghost_history[id], cmd, wall_hit);
                         pthread_mutex_unlock(&shm->mutex_ghost_state);
