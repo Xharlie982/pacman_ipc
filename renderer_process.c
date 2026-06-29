@@ -257,7 +257,7 @@ int main() {
 
     sem_post(&shm->sem_ready_done); 
 #endif
-    
+    static char last_ansi_frame[65536] = "";
     int over = 0;
     while (1) {
         sem_wait(&shm->sem_renderer_turn);
@@ -620,6 +620,7 @@ int main() {
         
         pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "\033[K\n");
 
+        strncpy(last_ansi_frame, frame_buffer, sizeof(last_ansi_frame)-1);
         output_text(frame_buffer);
         
         if (is_dying && current_lives > 0) {
@@ -705,6 +706,7 @@ int main() {
                 }
             }
             
+            strncpy(last_ansi_frame, respawn_buffer, sizeof(last_ansi_frame)-1);
             output_text(respawn_buffer);
             
             struct timespec respawn_delay = { .tv_sec = 0, .tv_nsec = TICK_DELAY_MS * 1000000L };
@@ -801,56 +803,64 @@ CLEANUP:
     while (shm->sim_time_ms == 0.0 && wait_cnt++ < 100) usleep(1000);
     
     char finish_buf[1024];
-    int fpos = 0;
-    fpos += snprintf(finish_buf + fpos, sizeof(finish_buf) - fpos,
+    snprintf(finish_buf, sizeof(finish_buf),
         "\n%s=====================================================================%s\n"
         "%s🏆 PARTIDA FINALIZADA CON ÉXITO%s\n"
-        "%s=====================================================================%s\n"
-        "⏰  Tiempo neto de simulación          : %s%.2f ms%s\n"
-        "🔥  Operaciones concurrentes procesadas : %s%lld%s\n"
         "%s=====================================================================%s\n\n"
         "👉 Presiona %s[M]%s y ENTER para ver la PANTALLA OFICIAL DE 8 MÉTRICAS.\n"
         "👉 O presiona %s[ENTER]%s directamente para salir a tu terminal WSL...\n",
         COLOR_INFO, COLOR_RESET, COLOR_PACMAN, COLOR_RESET, COLOR_INFO, COLOR_RESET,
-        COLOR_POWER, shm->sim_time_ms, COLOR_RESET,
-        COLOR_SUCCESS, (long long)shm->stress_counter, COLOR_RESET,
-        COLOR_INFO, COLOR_RESET,
         COLOR_PACMAN, COLOR_RESET, COLOR_BLINKY, COLOR_RESET);
     output_text(finish_buf);
     
 #ifndef AUTOMATED_BENCHMARK
     if (isatty(STDIN_FILENO)) {
-        char ch = getchar();
-        if (ch == 'M' || ch == 'm') {
+        int current_screen = 0; // 0 = Mapa, 1 = Métricas
+        while (1) {
+            int ch = getchar();
+            if (ch == '\n' || ch == EOF) {
+                break; // Salir a terminal WSL
+            }
             if (ch != '\n') { int c; while((c = getchar()) != '\n' && c != EOF); }
-            char metrics_buf[2048];
-            snprintf(metrics_buf, sizeof(metrics_buf),
-                "\033[2J\033[H\n"
-                "%s=====================================================================%s\n"
-                "%s   PANTALLA OFICIAL DE 8 MÉTRICAS DE RENDIMIENTO (RIGOR CIENTÍFICO)  %s\n"
-                "%s=====================================================================%s\n\n"
-                "  %s1. Tiempo Interno de Simulación%s : %.2f ms\n"
-                "  %s2. Tiempo Real Total (Wall Clock)%s : %.4f s\n"
-                "  %s3. Tiempo CPU en Modo Usuario%s   : %.4f s\n"
-                "  %s4. Tiempo CPU en Modo Kernel%s    : %.4f s\n"
-                "  %s5. Consumo Máximo RAM (RSS)%s     : %ld KB\n"
-                "  %s6. Cambios Contexto Voluntarios%s : %ld\n"
-                "  %s7. Cambios Contexto Involuntarios%s : %ld\n"
-                "  %s8. Integridad de Datos (Ops)%s    : %lld / %lld\n\n"
-                "%s=====================================================================%s\n"
-                "Presiona ENTER para salir definitivamente y volver a la terminal WSL...\n",
-                COLOR_INFO, COLOR_RESET, COLOR_PACMAN, COLOR_RESET, COLOR_INFO, COLOR_RESET,
-                COLOR_POWER, COLOR_RESET, shm->sim_time_ms,
-                COLOR_POWER, COLOR_RESET, shm->wall_clock_s,
-                COLOR_POWER, COLOR_RESET, shm->user_cpu_s,
-                COLOR_POWER, COLOR_RESET, shm->sys_cpu_s,
-                COLOR_POWER, COLOR_RESET, shm->max_rss_kb,
-                COLOR_POWER, COLOR_RESET, shm->vol_context_switches,
-                COLOR_POWER, COLOR_RESET, shm->invol_context_switches,
-                COLOR_SUCCESS, COLOR_RESET, (long long)shm->stress_counter, shm->expected_stress_ops,
-                COLOR_INFO, COLOR_RESET);
-            output_text(metrics_buf);
-            getchar();
+            
+            if ((ch == 'M' || ch == 'm') && current_screen == 0) {
+                current_screen = 1;
+                char metrics_buf[2048];
+                snprintf(metrics_buf, sizeof(metrics_buf),
+                    "\033[2J\033[H\n"
+                    "%s=====================================================================%s\n"
+                    "%s   PANTALLA OFICIAL DE 8 MÉTRICAS DE RENDIMIENTO (RIGOR CIENTÍFICO)  %s\n"
+                    "%s=====================================================================%s\n\n"
+                    "  %s1. Tiempo Interno de Simulación%s : %.2f ms\n"
+                    "  %s2. Tiempo Real Total (Wall Clock)%s : %.4f s\n"
+                    "  %s3. Tiempo CPU en Modo Usuario%s   : %.4f s\n"
+                    "  %s4. Tiempo CPU en Modo Kernel%s    : %.4f s\n"
+                    "  %s5. Consumo Máximo RAM (RSS)%s     : %ld KB\n"
+                    "  %s6. Cambios Contexto Voluntarios%s : %ld\n"
+                    "  %s7. Cambios Contexto Involuntarios%s : %ld\n"
+                    "  %s8. Integridad de Datos (Ops)%s    : %lld / %lld\n\n"
+                    "%s=====================================================================%s\n"
+                    "👉 Presiona %s[V]%s y ENTER para Volver a ver el mapa de la partida.\n"
+                    "👉 O presiona %s[ENTER]%s para salir definitivamente a tu terminal WSL...\n",
+                    COLOR_INFO, COLOR_RESET, COLOR_PACMAN, COLOR_RESET, COLOR_INFO, COLOR_RESET,
+                    COLOR_POWER, COLOR_RESET, shm->sim_time_ms,
+                    COLOR_POWER, COLOR_RESET, shm->wall_clock_s,
+                    COLOR_POWER, COLOR_RESET, shm->user_cpu_s,
+                    COLOR_POWER, COLOR_RESET, shm->sys_cpu_s,
+                    COLOR_POWER, COLOR_RESET, shm->max_rss_kb,
+                    COLOR_POWER, COLOR_RESET, shm->vol_context_switches,
+                    COLOR_POWER, COLOR_RESET, shm->invol_context_switches,
+                    COLOR_SUCCESS, COLOR_RESET, (long long)shm->stress_counter, shm->expected_stress_ops,
+                    COLOR_INFO, COLOR_RESET,
+                    COLOR_PACMAN, COLOR_RESET, COLOR_BLINKY, COLOR_RESET);
+                output_text(metrics_buf);
+            } else if ((ch == 'V' || ch == 'v') && current_screen == 1) {
+                current_screen = 0;
+                output_text(last_ansi_frame);
+                output_text(finish_buf);
+            } else {
+                break; // Cualquier otra tecla sale
+            }
         }
     }
 #endif
