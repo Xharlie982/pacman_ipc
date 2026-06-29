@@ -3,7 +3,7 @@
 SharedMemory *shm;
 char case_path[256];
 
-Command p1_buffer[5];
+Command p1_buffer[BUFFER_SIZE];
 int p1_head = 0, p1_tail = 0, p1_count = 0;
 pthread_mutex_t p1_mutex_buffer;
 pthread_cond_t p1_cond_not_empty, p1_cond_not_full;
@@ -37,10 +37,10 @@ void* p1_movement_reader(void* arg) {
         if (cmd.type == CMD_EOF) continue;
 
         pthread_mutex_lock(&p1_mutex_buffer);
-        while (p1_count == 5 && !check_game_over_safe()) pthread_cond_wait(&p1_cond_not_full, &p1_mutex_buffer);
+        while (p1_count == BUFFER_SIZE && !check_game_over_safe()) pthread_cond_wait(&p1_cond_not_full, &p1_mutex_buffer);
         if (check_game_over_safe()) { pthread_mutex_unlock(&p1_mutex_buffer); break; }
 
-        p1_buffer[p1_tail] = cmd; p1_tail = (p1_tail + 1) % 5; p1_count++;
+        p1_buffer[p1_tail] = cmd; p1_tail = (p1_tail + 1) % BUFFER_SIZE; p1_count++;
         pthread_cond_signal(&p1_cond_not_empty);
         pthread_mutex_unlock(&p1_mutex_buffer);
     }
@@ -73,7 +73,7 @@ void* p1_movement_executor(void* arg) {
         }
 
         if (p1_count > 0) {
-            Command cmd = p1_buffer[p1_head]; p1_head = (p1_head + 1) % 5; p1_count--;
+            Command cmd = p1_buffer[p1_head]; p1_head = (p1_head + 1) % BUFFER_SIZE; p1_count--;
             pthread_cond_signal(&p1_cond_not_full);
             
             if (cmd.type != CMD_SET_PRIORITY) {
@@ -146,6 +146,10 @@ void* p1_pacman_publisher(void* arg) {
                 shm->pacman_score += 10;
                 shm->dots_eaten[new_y][new_x] = 1;
             }
+        }
+
+        for(volatile int k=0; k<100000; k++) {
+            shm->stress_counter++;
         }
 
         shm->pacman_old_x = old_x; shm->pacman_old_y = old_y;

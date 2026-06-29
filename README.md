@@ -159,18 +159,15 @@ A continuación se describen los cuatro escenarios de prueba que el evaluador pu
 
 #### ① Versión Base
 
-| Macro | Estado |
-|---|---|
-| `ENABLE_POWER_PELLETS` | ❌ Desactivado |
-| `MODO_GRAFICO_SDL` | ❌ Desactivado |
+| Macro | Estado | Atajo Modular |
+|---|---|---|
+| `ENABLE_POWER_PELLETS` | ❌ Desactivado | `make test1` |
+| `MODO_GRAFICO_SDL` | ❌ Desactivado | |
 
-La configuración mínima del sistema. El juego se ejecuta íntegramente en la **terminal ANSI**, sin soporte gráfico ni lógica de poderes. Ideal para verificar la corrección de la sincronización POSIX, los semáforos y la memoria compartida en un entorno sin dependencias externas.
+La configuración mínima del sistema. El juego se ejecuta íntegramente en la **terminal ANSI**, sin soporte gráfico ni lógica de poderes.
 
 ```bash
-# En shared.h (línea 22):       // #define ENABLE_POWER_PELLETS
-# En renderer_process.c (línea 8): // #define MODO_GRAFICO_SDL
-
-make clean && make
+make test1
 ./scheduler_process cases/caso1
 ```
 
@@ -178,18 +175,15 @@ make clean && make
 
 #### ② Versión Base + Power Pellets
 
-| Macro | Estado |
-|---|---|
-| `ENABLE_POWER_PELLETS` | ✅ Activado |
-| `MODO_GRAFICO_SDL` | ❌ Desactivado |
+| Macro | Estado | Atajo Modular |
+|---|---|---|
+| `ENABLE_POWER_PELLETS` | ✅ Activado | `make test_bonus` o `make test1 POWER=1` |
+| `MODO_GRAFICO_SDL` | ❌ Desactivado | |
 
-Habilita la lógica completa de _power pellets_ y modo cacería, manteniéndose en el renderizado por **terminal ANSI**. Permite evaluar la correcta implementación del cambio de estado de los fantasmas, el temporizador de cacería y el sistema de puntuación extendido, sin requerir un servidor gráfico.
+Habilita la lógica completa de _power pellets_ y modo cacería en terminal ANSI.
 
 ```bash
-# En shared.h (línea 22):       #define ENABLE_POWER_PELLETS
-# En renderer_process.c (línea 8): // #define MODO_GRAFICO_SDL
-
-make clean && make
+make test1 POWER=1
 ./scheduler_process cases/caso4
 ```
 
@@ -197,18 +191,15 @@ make clean && make
 
 #### ③ Versión Base + SDL2
 
-| Macro | Estado |
-|---|---|
-| `ENABLE_POWER_PELLETS` | ❌ Desactivado |
-| `MODO_GRAFICO_SDL` | ✅ Activado |
+| Macro | Estado | Atajo Modular |
+|---|---|---|
+| `ENABLE_POWER_PELLETS` | ❌ Desactivado | `make test1 SDL=1` |
+| `MODO_GRAFICO_SDL` | ✅ Activado | |
 
-Activa el renderizado en **ventana gráfica SDL2** sin incluir la lógica de poderes. Permite evaluar de forma aislada la integración del sistema de renderizado gráfico con la arquitectura de procesos POSIX, verificando que la memoria compartida se lea y visualice correctamente en tiempo real.
+Activa el renderizado en **ventana gráfica SDL2 (redimensionable y auto-escalable)**.
 
 ```bash
-# En shared.h (línea 22):       // #define ENABLE_POWER_PELLETS
-# En renderer_process.c (línea 8): #define MODO_GRAFICO_SDL
-
-make clean && make
+make test1 SDL=1
 ./scheduler_process cases/caso1
 ```
 
@@ -216,20 +207,73 @@ make clean && make
 
 #### ④ Versión Completa (SDL2 + Power Pellets)
 
-| Macro | Estado |
-|---|---|
-| `ENABLE_POWER_PELLETS` | ✅ Activado |
-| `MODO_GRAFICO_SDL` | ✅ Activado |
+| Macro | Estado | Atajo Modular |
+|---|---|---|
+| `ENABLE_POWER_PELLETS` | ✅ Activado | `make test1 SDL=1 POWER=1` |
+| `MODO_GRAFICO_SDL` | ✅ Activado | |
 
-La **experiencia arcade completa**. Activa simultáneamente el renderizado SDL2 y la lógica de _power pellets_, reproduciendo el comportamiento del juego original con toda la riqueza visual e interactividad del sistema. Esta configuración ejercita la totalidad del código del proyecto.
+La **experiencia arcade completa** que activa simultáneamente gráficos SDL2 y poderes.
 
 ```bash
-# En shared.h (línea 22):       #define ENABLE_POWER_PELLETS
-# En renderer_process.c (línea 8): #define MODO_GRAFICO_SDL
-
-make clean && make
+make test1 SDL=1 POWER=1
 ./scheduler_process cases/caso4
 ```
+
+---
+
+## 5. Registro Completo de Concurrencia e IPC
+
+A continuación se detalla el inventario riguroso de todos los hilos POSIX, semáforos, mutex y variables de condición implementados por componente:
+
+### 🧵 Hilos POSIX (`pthread_t`) por Proceso
+1. **Planificador (`scheduler_process.c` - P0)**:
+   - `main`: Hilo principal de inicialización y sincronización general.
+   - `p0_tick_thread`: Generador del reloj maestro (ticks del juego).
+   - `p0_scheduler_thread`: Árbitro Round-Robin y asignador de turnos de CPU.
+   - `p0_signal_thread`: Receptor asíncrono de comandos y señales directas.
+2. **Pac-Man (`pacman_process.c` - P1)**:
+   - `main`: Hilo principal de control P1.
+   - `p1_movement_reader`: Productor que lee las instrucciones de movimiento (archivo/pipe).
+   - `p1_movement_executor`: Consumidor que procesa físicas y actualiza la posición del jugador.
+   - `p1_pacman_publisher`: Publicador del estado hacia la memoria compartida.
+3. **Enemigos (`enemy_process.c` - P2)**:
+   - `main`: Hilo principal de control P2.
+   - `p2_controller_thread`: Controlador general y receptor del turno de CPU.
+   - `p2_tracker_thread`: Evaluador de las coordenadas del jugador.
+   - `p2_collision_thread`: Monitor de colisiones físicas entre Pac-Man y fantasmas.
+   - `p2_ghost_thread` (x4 hilos): Inteligencia artificial concurrente independiente para `Blinky`, `Pinky`, `Inky` y `Clyde`.
+4. **Renderizador (`renderer_process.c` - P3)**:
+   - `main`: Bucle continuo de renderizado (terminal ANSI o motor SDL2).
+
+### 🚦 Semáforos POSIX en Memoria Compartida (`sem_t` en `shared.h`)
+- `sem_tick_start`: Dispara el inicio de un nuevo tick cronometrado.
+- `sem_scheduler_start`: Despierta al hilo planificador.
+- `sem_signal_start`: Sincroniza la recepción de señales externas.
+- `sem_pacman_turn`: Otorga el quantum de ejecución al proceso Pac-Man.
+- `sem_enemy_turn`: Otorga el quantum de ejecución al proceso Fantasmas.
+- `sem_turn_finished`: Notifica al planificador la culminación de un turno de CPU.
+- `sem_check_collision`: Ordena al hilo de colisiones realizar el cálculo físico.
+- `sem_collision_checked`: Confirma al planificador el término del chequeo de impacto.
+- `sem_renderer_turn`: Autoriza al renderizador a refrescar la pantalla.
+- `sem_renderer_done`: Confirma que el dibujo del fotograma ha terminado.
+- `sem_ready_done`: Sincronización de la pantalla inicial "READY!".
+
+### 🔒 Mutex POSIX (`pthread_mutex_t`)
+- **En Memoria Compartida (`shared.h`)**:
+  - `mutex_game_state`: Candado global sobre el estado general (ticks, game over, score, vidas, grilla).
+  - `mutex_pacman_state`: Candado sobre las coordenadas e historial de movimientos del Pac-Man.
+  - `mutex_ghost_state`: Candado sobre coordenadas, orientaciones y temporizadores de los 4 fantasmas.
+  - `mutex_mailboxes`: Candado para lectura/escritura en buzones de comunicación IPC.
+  - `mutex_collisions`: Candado para reportar muertes y actualizar el *kill feed*.
+- **Internos de Procesos**:
+  - `p1_mutex_buffer` (`pacman_process.c`): Candado del búfer circular interno productor-consumidor.
+  - `p2_mutex_ghosts` (`enemy_process.c`): Candado interno de sincronización de hilos de fantasmas.
+  - `p2_mutex_local` (`enemy_process.c`): Candado de variables locales de control IA.
+
+### 🛎️ Variables de Condición (`pthread_cond_t`)
+- **En `pacman_process.c`**:
+  - `p1_cond_not_empty`: Bloquea al consumidor hasta que haya comandos en el búfer circular.
+  - `p1_cond_not_full`: Bloquea al lector cuando el búfer circular alcanza su capacidad máxima.
 
 ---
 
@@ -242,6 +286,7 @@ pacman_posix/
 ├── pacman_process.c          # Proceso Pac-Man (movimiento y puntuación)
 ├── enemy_process.c           # Proceso de enemigos (comportamiento de fantasmas)
 ├── renderer_process.c        # Proceso renderizador (ANSI / SDL2)
+├── ipc_benchmark.c           # Benchmark de IPC (SHM vs Pipes vs Archivos)
 ├── Makefile                  # Sistema de compilación
 └── cases/
     ├── caso1                 # Caso: Sincronización base Round-Robin
@@ -258,14 +303,14 @@ pacman_posix/
 # 1. Instalar dependencias (una sola vez)
 sudo apt update && sudo apt install build-essential libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
 
-# 2. Compilar (o recompilar tras modificar macros)
-make clean && make
+# 2. Compilar modularmente con atajos (Combinaciones libres de SDL=1 y POWER=1)
+make test1 SDL=1          # Caso Ideal en modo Gráfico SDL2
+make test1 POWER=1        # Caso Ideal con Power Pellets activados
+make test2 SDL=1 POWER=1  # Test sin sincronización con Gráficos y Poderes
 
-# 3. Ejecutar cualquier caso de prueba
-./scheduler_process cases/caso1
-./scheduler_process cases/caso2
-./scheduler_process cases/caso3
-./scheduler_process cases/caso4
+# 3. Pruebas de Estrés Integradas (Sin interfaz visual, 100 Ejecuciones x 100,000 Iteraciones por turno)
+make test10               # Valida 100% de estabilidad y precisión con Mutex POSIX activo
+make test11               # Demuestra pérdida masiva de datos (Race Conditions) al apagar Mutex
 ```
 
 ---

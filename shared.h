@@ -14,12 +14,52 @@
 #include <time.h>
 #include <errno.h>
 #include <ctype.h>
+#include <sys/resource.h>
 
 #define MAX_TICKS 38
 #define SHM_NAME "/pacman_shm_game"
 #define TICK_DELAY_MS 500 
-//Test
-// #define ENABLE_POWER_PELLETS 
+// =========================================================================
+// INTERRUPTORES MANUALES PARA PRUEBAS Y BENCHMARKS (TESTS 2 al 9)
+// Por defecto están comentados con "//" para ejecutar el CASO IDEAL (Test 1).
+// Si compilas manualmente, puedes descomentar el que desees probar.
+// =========================================================================
+// #define DISABLE_SYNC          // Test 2: Desactiva mutex (fuerza colisiones)
+// #define ONLY_SEMAPHORES       // Test 3: Sincronización solo semáforos
+// #define ONLY_MUTEX            // Test 4: Sincronización solo mutex
+// #define BUFFER_SIZE 1         // Test 5: Buffer circular tamaño mínimo (1)
+// #define BUFFER_SIZE 20        // Test 6: Buffer circular tamaño grande (20)
+// #define USE_SYSCALL_WRITE     // Test 7: Usar syscall write() en vez de printf()
+// #define GHOSTS_FIRST_PRIORITY // Test 8: Inversión de prioridad (fantasmas primero)
+// #define P0_LOWEST_PRIORITY    // Test 9: Prioridad P0 más baja (P0 < P1 < P2)
+// #define HEADLESS              // Test 10/11: Modo sin renderizado visual
+// #define ENABLE_POWER_PELLETS  // Test 12: Habilitar píldoras de poder (caso4)
+
+#define STRESS_OPS 100000
+
+#ifdef STRESS_TEST
+    #ifndef HEADLESS
+        #define HEADLESS
+    #endif
+    #undef TICK_DELAY_MS
+    #define TICK_DELAY_MS 0
+    #define PROGRAM_RUNS 100
+#else
+    #define PROGRAM_RUNS 1
+#endif
+
+#ifndef BUFFER_SIZE
+#define BUFFER_SIZE 5
+#endif
+
+static inline void print_consola(const char *mensaje) {
+    if (mensaje) {
+        ssize_t ret = write(STDOUT_FILENO, mensaje, strlen(mensaje));
+        (void)ret;
+    }
+}
+
+
 
 #define COLOR_RESET     "\033[0m"
 #define COLOR_PACMAN    "\033[38;2;255;255;0m"
@@ -83,6 +123,7 @@ typedef struct {
 #endif
 
     int use_dynamic_priority;
+    int p0_priority;
     int pacman_priority; int pending_pacman_priority; int pacman_priority_request_active;
     int enemy_priority; int pending_enemy_priority; int enemy_priority_request_active;
     
@@ -90,6 +131,15 @@ typedef struct {
     int is_caso4;
     int pacman_eof; int ghost_eof[4];
     int current_turn; int last_played_process;
+    double sim_time_ms;
+    double wall_clock_s;
+    double user_cpu_s;
+    double sys_cpu_s;
+    long max_rss_kb;
+    long vol_context_switches;
+    long invol_context_switches;
+    volatile long long stress_counter;
+    long long expected_stress_ops;
     
     sem_t sem_tick_start, sem_scheduler_start, sem_signal_start, sem_pacman_turn, sem_enemy_turn;
     sem_t sem_turn_finished, sem_check_collision, sem_collision_checked, sem_renderer_turn, sem_renderer_done;
@@ -97,6 +147,42 @@ typedef struct {
     
     pthread_mutex_t mutex_game_state, mutex_pacman_state, mutex_ghost_state, mutex_mailboxes, mutex_collisions;
 } SharedMemory;
+
+extern SharedMemory *shm;
+
+#if defined(DISABLE_SYNC) || defined(ONLY_SEMAPHORES)
+  static inline int disabled_mutex_lock(pthread_mutex_t *m) {
+      if ((void*)m < (void*)shm || (void*)m >= (void*)(shm + 1)) {
+          return pthread_mutex_lock(m);
+      }
+      return 0;
+  }
+  static inline int disabled_mutex_unlock(pthread_mutex_t *m) {
+      if ((void*)m < (void*)shm || (void*)m >= (void*)(shm + 1)) {
+          return pthread_mutex_unlock(m);
+      }
+      return 0;
+  }
+  #define pthread_mutex_lock(m) disabled_mutex_lock(m)
+  #define pthread_mutex_unlock(m) disabled_mutex_unlock(m)
+#endif
+
+#if defined(ONLY_MUTEX)
+  static inline int disabled_sem_wait(sem_t *s) {
+      if ((void*)s < (void*)shm || (void*)s >= (void*)(shm + 1)) {
+          return sem_wait(s);
+      }
+      return 0;
+  }
+  static inline int disabled_sem_post(sem_t *s) {
+      if ((void*)s < (void*)shm || (void*)s >= (void*)(shm + 1)) {
+          return sem_post(s);
+      }
+      return 0;
+  }
+  #define sem_wait(s) disabled_sem_wait(s)
+  #define sem_post(s) disabled_sem_post(s)
+#endif
 
 static inline Command parse_line(char *line) {
     Command cmd; cmd.type = CMD_EOF; cmd.value = 0;

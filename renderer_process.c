@@ -1,11 +1,11 @@
 #include "shared.h"
 
 // =========================================================================
-// INTERRUPTOR MAESTRO DE ARQUITECTURA
-// Ponle "//" al inicio de la línea 8 para usar la TERMINAL ANSI.
-// Quítale los "//" para usar la VENTANA GRÁFICA SDL2.
+// INTERRUPTOR MANUAL DE SALIDA GRÁFICA (Test 1B)
+// Por defecto está comentado para usar la TERMINAL ANSI (Test 1).
+// Quítale el "//" a la línea inferior (o pasa -DMODO_GRAFICO_SDL) para SDL2.
 // =========================================================================
-// #define MODO_GRAFICO_SDL 
+//#define MODO_GRAFICO_SDL 
 
 #ifdef MODO_GRAFICO_SDL
     #include <SDL2/SDL.h>
@@ -31,11 +31,33 @@ void render_text_ttf(SDL_Renderer* renderer, TTF_Font* font, const char* text, i
 
 SharedMemory *shm;
 
+static inline void output_text(const char *buf) {
+#ifdef USE_SYSCALL_WRITE
+    print_consola(buf);
+#else
+    printf("%s", buf); fflush(stdout);
+#endif
+}
+
 int main() {
     int fd = shm_open(SHM_NAME, O_RDWR, 0666);
     if (fd < 0) { perror("P3 SHM"); exit(1); }
     shm = mmap(NULL, sizeof(SharedMemory), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
+
+#ifdef HEADLESS
+    sem_post(&shm->sem_ready_done);
+    while (1) {
+        sem_wait(&shm->sem_renderer_turn);
+        pthread_mutex_lock(&shm->mutex_game_state);
+        int over = shm->game_over;
+        pthread_mutex_unlock(&shm->mutex_game_state);
+        sem_post(&shm->sem_renderer_done);
+        if (over) break;
+    }
+    munmap(shm, sizeof(SharedMemory));
+    return 0;
+#endif
 
 #ifdef MODO_GRAFICO_SDL
     SDL_Init(SDL_INIT_VIDEO);
@@ -45,8 +67,9 @@ int main() {
     int win_width = shm->map_width * TILE_SIZE;
     int win_height = (shm->map_height * TILE_SIZE) + UI_TOP + UI_BOTTOM;
     
-    SDL_Window* window = SDL_CreateWindow("Pac-Man POSIX GUI - Arcade Perfect", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_width, win_height, 0);
+    SDL_Window* window = SDL_CreateWindow("Pac-Man POSIX GUI - Arcade Perfect", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_width, win_height, SDL_WINDOW_RESIZABLE);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    SDL_RenderSetLogicalSize(renderer, win_width, win_height);
 
     SDL_Texture* tex_pac_r = IMG_LoadTexture(renderer, "assets/pacman_r.png");
     SDL_Texture* tex_pac_l = IMG_LoadTexture(renderer, "assets/pacman_l.png");
@@ -83,11 +106,14 @@ int main() {
         pthread_mutex_lock(&shm->mutex_pacman_state);
         int init_px = shm->pacman_init_x, init_py = shm->pacman_init_y;
         int local_dots[20][20]; memcpy(local_dots, shm->dots_eaten, sizeof(local_dots));
-        int local_tombstones[20][20]; memcpy(local_tombstones, shm->tombstones, sizeof(local_tombstones));
 #ifdef ENABLE_POWER_PELLETS
         int local_power[20][20]; memcpy(local_power, shm->power_pellets, sizeof(local_power));
 #endif
         pthread_mutex_unlock(&shm->mutex_pacman_state);
+
+        pthread_mutex_lock(&shm->mutex_game_state);
+        int local_tombstones[20][20]; memcpy(local_tombstones, shm->tombstones, sizeof(local_tombstones));
+        pthread_mutex_unlock(&shm->mutex_game_state);
 
         pthread_mutex_lock(&shm->mutex_ghost_state);
         int init_gx[4], init_gy[4];
@@ -154,9 +180,7 @@ int main() {
         SDL_Delay(20);
     }
     sem_post(&shm->sem_ready_done); 
-#else
-    printf("\033[?1049h"); 
-    printf("\033[2J");     
+    output_text("\033[?1049h\033[2J");     
     
     char display_init[20][20]; 
     memcpy(display_init, shm->map_grid, sizeof(display_init));
@@ -164,11 +188,14 @@ int main() {
     pthread_mutex_lock(&shm->mutex_pacman_state);
     int init_px = shm->pacman_init_x, init_py = shm->pacman_init_y;
     int local_dots[20][20]; memcpy(local_dots, shm->dots_eaten, sizeof(local_dots));
-    int local_tombstones[20][20]; memcpy(local_tombstones, shm->tombstones, sizeof(local_tombstones));
 #ifdef ENABLE_POWER_PELLETS
     int local_power[20][20]; memcpy(local_power, shm->power_pellets, sizeof(local_power));
 #endif
     pthread_mutex_unlock(&shm->mutex_pacman_state);
+
+    pthread_mutex_lock(&shm->mutex_game_state);
+    int local_tombstones[20][20]; memcpy(local_tombstones, shm->tombstones, sizeof(local_tombstones));
+    pthread_mutex_unlock(&shm->mutex_game_state);
 
     pthread_mutex_lock(&shm->mutex_ghost_state);
     char gc_init[4] = {'A', 'B', 'C', 'D'};
@@ -194,11 +221,11 @@ int main() {
                 case 'B': ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s%c%s", COLOR_PINKY,  c, COLOR_RESET); break;
                 case 'C': ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s%c%s", COLOR_INKY,   c, COLOR_RESET); break;
                 case 'D': ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s%c%s", COLOR_CLYDE,  c, COLOR_RESET); break;
-                case 'X': ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s%c%s", shm->is_caso4 ? COLOR_WALL_CASO4 : COLOR_WALL, c, COLOR_RESET); break;
+                case 'X': ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s█%s", shm->is_caso4 ? COLOR_WALL_CASO4 : COLOR_WALL, COLOR_RESET); break;
                 case 'O': 
 #ifdef ENABLE_POWER_PELLETS
                     if (local_power[y][x]) {
-                        ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s*%s", COLOR_POWER, COLOR_RESET); 
+                        ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s●%s", COLOR_POWER, COLOR_RESET); 
                         break;
                     }
 #endif
@@ -212,7 +239,7 @@ int main() {
         ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "\n");
     }
     ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "\n⏱️  Tick: 000 | 🏆 Score: 0000 | ❤️  Lives: 3\033[K\n");
-    ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "⚡ P1 Priority: -- | ⚡ P2 Priority: --\033[K\n");
+    ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "⚡ P0: -- | ⚡ P1: -- | ⚡ P2: --\033[K\n");
     ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "📌 Status: %sREADY!%s\033[K\n", COLOR_PACMAN, COLOR_RESET);
     ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "\n--- Movement History ---\n%sPac-Man (P):%s\n%sBlinky  (A):%s\n%sPinky   (B):%s\n%sInky    (C):%s\n%sClyde   (D):%s\n", COLOR_PACMAN, COLOR_RESET, COLOR_BLINKY, COLOR_RESET, COLOR_PINKY, COLOR_RESET, COLOR_INKY, COLOR_RESET, COLOR_CLYDE, COLOR_RESET);
     
@@ -223,7 +250,7 @@ int main() {
         ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "\n--- Lost Lives ---\n1st 💔: --\n2nd 💔: --\n3rd 💔: --\n                                                                      \n");
     }
 
-    printf("%s", init_buffer); fflush(stdout);
+    output_text(init_buffer);
     
     struct timespec initial_delay = { .tv_sec = 0, .tv_nsec = TICK_DELAY_MS * 1000000L };
     nanosleep(&initial_delay, NULL);
@@ -273,11 +300,14 @@ int main() {
         int px = shm->pacman_x, py = shm->pacman_y, score = shm->pacman_score;
         int px_old = shm->pacman_old_x, py_old = shm->pacman_old_y;
         int local_dots[20][20]; memcpy(local_dots, shm->dots_eaten, sizeof(local_dots));
-        int local_tombstones[20][20]; memcpy(local_tombstones, shm->tombstones, sizeof(local_tombstones));
 #ifdef ENABLE_POWER_PELLETS
         int local_power[20][20]; memcpy(local_power, shm->power_pellets, sizeof(local_power));
 #endif
         pthread_mutex_unlock(&shm->mutex_pacman_state);
+
+        pthread_mutex_lock(&shm->mutex_game_state);
+        int local_tombstones[20][20]; memcpy(local_tombstones, shm->tombstones, sizeof(local_tombstones));
+        pthread_mutex_unlock(&shm->mutex_game_state);
 
         pthread_mutex_lock(&shm->mutex_ghost_state);
         int gx[4], gy[4];
@@ -483,18 +513,18 @@ int main() {
         int px = shm->pacman_x, py = shm->pacman_y, score = shm->pacman_score;
         char p_hist[8192]; strncpy(p_hist, shm->pacman_history, 8191); p_hist[8191] = '\0';
         int local_dots[20][20]; memcpy(local_dots, shm->dots_eaten, sizeof(local_dots));
-        int local_tombstones[20][20]; memcpy(local_tombstones, shm->tombstones, sizeof(local_tombstones));
 #ifdef ENABLE_POWER_PELLETS
         int local_power[20][20]; memcpy(local_power, shm->power_pellets, sizeof(local_power));
 #endif
         pthread_mutex_unlock(&shm->mutex_pacman_state);
         
         pthread_mutex_lock(&shm->mutex_game_state);
+        int local_tombstones[20][20]; memcpy(local_tombstones, shm->tombstones, sizeof(local_tombstones));
         int tick = shm->global_tick;
         pthread_mutex_unlock(&shm->mutex_game_state);
 
         pthread_mutex_lock(&shm->mutex_mailboxes);
-        int p1_prio = shm->pacman_priority, p2_prio = shm->enemy_priority;
+        int p0_prio = shm->p0_priority, p1_prio = shm->pacman_priority, p2_prio = shm->enemy_priority;
         pthread_mutex_unlock(&shm->mutex_mailboxes);
 
         pthread_mutex_lock(&shm->mutex_ghost_state);
@@ -525,11 +555,11 @@ int main() {
                     case 'B': pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "%s%c%s", is_scared[1] ? COLOR_SCARED : COLOR_PINKY, c, COLOR_RESET); break;
                     case 'C': pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "%s%c%s", is_scared[2] ? COLOR_SCARED : COLOR_INKY, c, COLOR_RESET); break;
                     case 'D': pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "%s%c%s", is_scared[3] ? COLOR_SCARED : COLOR_CLYDE, c, COLOR_RESET); break;
-                    case 'X': pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "%s%c%s", shm->is_caso4 ? COLOR_WALL_CASO4 : COLOR_WALL, c, COLOR_RESET); break;
+                    case 'X': pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "%s█%s", shm->is_caso4 ? COLOR_WALL_CASO4 : COLOR_WALL, COLOR_RESET); break;
                     case 'O': 
 #ifdef ENABLE_POWER_PELLETS
                         if (local_power[y][x]) {
-                            pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "%s*%s", COLOR_POWER, COLOR_RESET); 
+                            pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "%s●%s", COLOR_POWER, COLOR_RESET); 
                             break;
                         }
 #endif
@@ -545,7 +575,7 @@ int main() {
         }
         
         pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "\n⏱️  Tick: %03d | 🏆 Score: %04d | ❤️  Lives: %d\033[K\n", tick, score, current_lives);
-        pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "⚡ P1 Priority: %02d | ⚡ P2 Priority: %02d\033[K\n", p1_prio, p2_prio);
+        pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "⚡ P0: %02d | ⚡ P1: %02d | ⚡ P2: %02d\033[K\n", p0_prio, p1_prio, p2_prio);
         
         if (over) pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "📌 Status: %sFINISHED%s\033[K\n", COLOR_ERROR, COLOR_RESET);
         else if (is_dying) pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "📌 Status: %sRESPAWNING...%s\033[K\n", COLOR_BLINKY, COLOR_RESET);
@@ -590,7 +620,7 @@ int main() {
         
         pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "\033[K\n");
 
-        printf("%s", frame_buffer); fflush(stdout);
+        output_text(frame_buffer);
         
         if (is_dying && current_lives > 0) {
             struct timespec death_delay = { .tv_sec = 0, .tv_nsec = TICK_DELAY_MS * 1000000L };
@@ -623,11 +653,11 @@ int main() {
                         case 'B': rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "%s%c%s", COLOR_PINKY,  c, COLOR_RESET); break;
                         case 'C': rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "%s%c%s", COLOR_INKY,   c, COLOR_RESET); break;
                         case 'D': rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "%s%c%s", COLOR_CLYDE,  c, COLOR_RESET); break;
-                        case 'X': rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "%s%c%s", shm->is_caso4 ? COLOR_WALL_CASO4 : COLOR_WALL, c, COLOR_RESET); break;
+                        case 'X': rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "%s█%s", shm->is_caso4 ? COLOR_WALL_CASO4 : COLOR_WALL, COLOR_RESET); break;
                         case 'O': 
 #ifdef ENABLE_POWER_PELLETS
                             if (local_power[y][x]) {
-                                rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "%s*%s", COLOR_POWER, COLOR_RESET); 
+                                rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "%s●%s", COLOR_POWER, COLOR_RESET); 
                                 break;
                             }
 #endif
@@ -641,7 +671,7 @@ int main() {
                 rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "\n");
             }
             rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "\n⏱️  Tick: %03d | 🏆 Score: %04d | ❤️  Lives: %d\033[K\n", tick, score, current_lives);
-            rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "⚡ P1 Priority: %02d | ⚡ P2 Priority: %02d\033[K\n", p1_prio, p2_prio);
+            rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "⚡ P0: %02d | ⚡ P1: %02d | ⚡ P2: %02d\033[K\n", p0_prio, p1_prio, p2_prio);
             rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "📌 Status: %sRESPAWN%s\033[K\n", COLOR_PACMAN, COLOR_RESET);
             
             rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "\n--- Movement History ---\n%sPac-Man (P):%s %s\033[K\n%sBlinky  (A):%s %s\033[K\n%sPinky   (B):%s %s\033[K\n%sInky    (C):%s %s\033[K\n%sClyde   (D):%s %s\033[K\n", COLOR_PACMAN, COLOR_RESET, p_hist, COLOR_BLINKY, COLOR_RESET, g_hist[0], COLOR_PINKY, COLOR_RESET, g_hist[1], COLOR_INKY, COLOR_RESET, g_hist[2], COLOR_CLYDE, COLOR_RESET, g_hist[3]);
@@ -675,7 +705,7 @@ int main() {
                 }
             }
             
-            printf("%s", respawn_buffer); fflush(stdout);
+            output_text(respawn_buffer);
             
             struct timespec respawn_delay = { .tv_sec = 0, .tv_nsec = TICK_DELAY_MS * 1000000L };
             nanosleep(&respawn_delay, NULL);
@@ -767,13 +797,65 @@ CLEANUP:
     IMG_Quit();
     SDL_Quit();
 #else
-    printf("\n%s=== SIMULATION FINISHED ===%s\n", COLOR_INFO, COLOR_RESET);
-    printf("Presiona ENTER para salir y restaurar tu terminal...\n");
-    fflush(stdout); 
+    int wait_cnt = 0;
+    while (shm->sim_time_ms == 0.0 && wait_cnt++ < 100) usleep(1000);
     
-    getchar();
+    char finish_buf[1024];
+    int fpos = 0;
+    fpos += snprintf(finish_buf + fpos, sizeof(finish_buf) - fpos,
+        "\n%s=====================================================================%s\n"
+        "%s🏆 PARTIDA FINALIZADA CON ÉXITO%s\n"
+        "%s=====================================================================%s\n"
+        "⏰  Tiempo neto de simulación          : %s%.2f ms%s\n"
+        "🔥  Operaciones concurrentes procesadas : %s%lld%s\n"
+        "%s=====================================================================%s\n\n"
+        "👉 Presiona %s[M]%s y ENTER para ver la PANTALLA OFICIAL DE 8 MÉTRICAS.\n"
+        "👉 O presiona %s[ENTER]%s directamente para salir a tu terminal WSL...\n",
+        COLOR_INFO, COLOR_RESET, COLOR_PACMAN, COLOR_RESET, COLOR_INFO, COLOR_RESET,
+        COLOR_POWER, shm->sim_time_ms, COLOR_RESET,
+        COLOR_SUCCESS, (long long)shm->stress_counter, COLOR_RESET,
+        COLOR_INFO, COLOR_RESET,
+        COLOR_PACMAN, COLOR_RESET, COLOR_BLINKY, COLOR_RESET);
+    output_text(finish_buf);
     
-    printf("\033[?1049l"); 
+#ifndef AUTOMATED_BENCHMARK
+    if (isatty(STDIN_FILENO)) {
+        char ch = getchar();
+        if (ch == 'M' || ch == 'm') {
+            if (ch != '\n') { int c; while((c = getchar()) != '\n' && c != EOF); }
+            char metrics_buf[2048];
+            snprintf(metrics_buf, sizeof(metrics_buf),
+                "\033[2J\033[H\n"
+                "%s=====================================================================%s\n"
+                "%s   PANTALLA OFICIAL DE 8 MÉTRICAS DE RENDIMIENTO (RIGOR CIENTÍFICO)  %s\n"
+                "%s=====================================================================%s\n\n"
+                "  %s1. Tiempo Interno de Simulación%s : %.2f ms\n"
+                "  %s2. Tiempo Real Total (Wall Clock)%s : %.4f s\n"
+                "  %s3. Tiempo CPU en Modo Usuario%s   : %.4f s\n"
+                "  %s4. Tiempo CPU en Modo Kernel%s    : %.4f s\n"
+                "  %s5. Consumo Máximo RAM (RSS)%s     : %ld KB\n"
+                "  %s6. Cambios Contexto Voluntarios%s : %ld\n"
+                "  %s7. Cambios Contexto Involuntarios%s : %ld\n"
+                "  %s8. Integridad de Datos (Ops)%s    : %lld / %lld\n\n"
+                "%s=====================================================================%s\n"
+                "Presiona ENTER para salir definitivamente y volver a la terminal WSL...\n",
+                COLOR_INFO, COLOR_RESET, COLOR_PACMAN, COLOR_RESET, COLOR_INFO, COLOR_RESET,
+                COLOR_POWER, COLOR_RESET, shm->sim_time_ms,
+                COLOR_POWER, COLOR_RESET, shm->wall_clock_s,
+                COLOR_POWER, COLOR_RESET, shm->user_cpu_s,
+                COLOR_POWER, COLOR_RESET, shm->sys_cpu_s,
+                COLOR_POWER, COLOR_RESET, shm->max_rss_kb,
+                COLOR_POWER, COLOR_RESET, shm->vol_context_switches,
+                COLOR_POWER, COLOR_RESET, shm->invol_context_switches,
+                COLOR_SUCCESS, COLOR_RESET, (long long)shm->stress_counter, shm->expected_stress_ops,
+                COLOR_INFO, COLOR_RESET);
+            output_text(metrics_buf);
+            getchar();
+        }
+    }
+#endif
+    
+    output_text("\033[?1049l"); 
 #endif
 
     munmap(shm, sizeof(SharedMemory));
