@@ -8,7 +8,7 @@
 ![API](https://img.shields.io/badge/API-POSIX-orange)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20WSL2-lightgrey)
 ![Renderer](https://img.shields.io/badge/renderer-ANSI%20%7C%20SDL2-green)
-![Branch](https://img.shields.io/badge/branch-sandbox-yellow)
+![Branch](https://img.shields.io/badge/branch-main-brightgreen)
 
 </div>
 
