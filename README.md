@@ -1,10 +1,32 @@
+<div align="center">
+
 # Pac-Man POSIX Concurrent
 
 **Proyecto de Sistemas Operativos — Concurrencia, IPC y Planificación de Procesos**
 
+![Language](https://img.shields.io/badge/C-C11-blue?logo=c&logoColor=white)
+![API](https://img.shields.io/badge/API-POSIX-orange)
+![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20WSL2-lightgrey)
+![Renderer](https://img.shields.io/badge/renderer-ANSI%20%7C%20SDL2-green)
+![Branch](https://img.shields.io/badge/branch-sandbox-yellow)
+
+</div>
+
 ---
 
-## Descripción General
+## Índice
+
+| | |
+|---|---|
+| [🎮 Descripción General](#-descripción-general) | [🧪 Suite de Tests Científicos](#-suite-de-tests-científicos-make-test1test15) |
+| [📦 Instalación de Dependencias](#-1-instalación-de-dependencias) | [🤖 Script Automatizado](#-6-script-de-ejecución-automatizada) |
+| [🔨 Compilación](#-2-compilación-del-proyecto) | [📊 Benchmark IPC](#-7-benchmark-ipc--justificación-empírica-de-mmap) |
+| [▶️ Casos de Prueba](#️-3-ejecución-de-los-casos-de-prueba) | [🔒 Primitivas POSIX](#-8-registro-completo-de-primitivas-posix) |
+| [⚙️ Interruptores de Arquitectura](#️-4-interruptores-de-arquitectura-macros-de-preprocesador) | [⚡ Comandos Esenciales](#-resumen-de-comandos-esenciales) |
+
+---
+
+## 🎮 Descripción General
 
 Este proyecto implementa una simulación del videojuego Pac-Man utilizando exclusivamente primitivas POSIX de bajo nivel: procesos independientes (`fork`/`exec`), memoria compartida (`shm_open`), semáforos (`sem_open`) y mutex POSIX. El sistema se compone de cuatro procesos independientes que cooperan en tiempo real a través de un segmento de memoria compartida (`/pacman_shm_game`):
 
@@ -19,7 +41,7 @@ La arquitectura completa se define en **`shared.h`**, que centraliza estructuras
 
 ---
 
-## Requisitos del Sistema
+## 🖥️ Requisitos del Sistema
 
 - **Sistema operativo:** Ubuntu 22.04 LTS o superior / WSL2 con Ubuntu
 - **Compilador:** GCC 11 o superior con soporte C11 (`-std=c11`)
@@ -27,7 +49,7 @@ La arquitectura completa se define en **`shared.h`**, que centraliza estructuras
 
 ---
 
-## 1. Instalación de Dependencias
+## 📦 1. Instalación de Dependencias
 
 ```bash
 sudo apt update
@@ -38,7 +60,7 @@ sudo apt install build-essential libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
 
 ---
 
-## 2. Compilación del Proyecto
+## 🔨 2. Compilación del Proyecto
 
 ```bash
 make clean && make
@@ -48,7 +70,7 @@ make clean && make
 
 ---
 
-## 3. Ejecución de los Casos de Prueba
+## ▶️ 3. Ejecución de los Casos de Prueba
 
 El directorio `cases/` contiene cuatro escenarios predefinidos:
 
@@ -79,7 +101,7 @@ make test14   # compila con ENABLE_POWER_PELLETS
 
 ---
 
-## 4. Interruptores de Arquitectura (Macros de Preprocesador)
+## ⚙️ 4. Interruptores de Arquitectura (Macros de Preprocesador)
 
 | Macro / Flag | Efecto |
 |---|---|
@@ -96,7 +118,7 @@ make test14   # compila con ENABLE_POWER_PELLETS
 
 ---
 
-## 5. Suite de Tests Científicos (make test1–test15)
+## 🧪 5. Suite de Tests Científicos (make test1–test15)
 
 Cada target compila los binarios con la configuración exacta. Uso: `make testN && ./scheduler_process cases/casoX`
 
@@ -131,7 +153,7 @@ Integridad = ops_stress_registradas / ops_stress_esperadas × 100
 
 ---
 
-## 6. Script de Ejecución Automatizada
+## 🤖 6. Script de Ejecución Automatizada
 
 ```bash
 ./run_all_tests.sh
@@ -152,7 +174,7 @@ Al terminar los 15 tests, el script pregunta si ejecutar el benchmark IPC.
 
 ---
 
-## 7. Benchmark IPC — Justificación Empírica de mmap()
+## 📊 7. Benchmark IPC — Justificación Empírica de mmap()
 
 ```bash
 make ipc_benchmark && ./ipc_benchmark
@@ -170,7 +192,7 @@ Compara tres mecanismos de IPC en 10 ejecuciones × 100,000 operaciones cada una
 
 ---
 
-## 8. Registro Completo de Primitivas POSIX
+## 🔒 8. Registro Completo de Primitivas POSIX
 
 ### Hilos POSIX (`pthread_t`) por Proceso
 
@@ -201,7 +223,7 @@ Más: `sem_signal_start`, `sem_ready_done`
 
 ---
 
-## Estructura del Repositorio
+## 📁 Estructura del Repositorio
 
 ```
 mi_pacman_sandbox/
@@ -223,7 +245,7 @@ mi_pacman_sandbox/
 
 ---
 
-## Resumen de Comandos Esenciales
+## ⚡ Resumen de Comandos Esenciales
 
 ```bash
 # Compilar desde cero
