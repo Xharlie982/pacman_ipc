@@ -58,11 +58,7 @@ void* p1_movement_executor(void* arg) {
         pthread_mutex_lock(&p1_mutex_buffer);
         
         while (p1_count == 0 && !p1_eof_reached) {
-            if (check_game_over_safe()) { 
-                pthread_mutex_unlock(&p1_mutex_buffer); 
-                p1_wake_all(); 
-                break; 
-            }
+            if (check_game_over_safe()) { break; }
             pthread_cond_wait(&p1_cond_not_empty, &p1_mutex_buffer);
         }
         

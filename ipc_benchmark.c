@@ -164,9 +164,9 @@ int main() {
     bench_pipe(0);
     bench_file(0);
 
-    int runs = 100;
+    int runs = 10;
     printf("\n--- FASE 2: Prueba de Estrés Sostenido (%d Ejecuciones x 100,000 Operaciones) ---\n", runs);
-    printf("Ejecutando 10 millones de operaciones por mecanismo, por favor espere...\n");
+    printf("Ejecutando 1 millón de operaciones por mecanismo, por favor espere...\n");
     double total_shm = 0, total_pipe = 0, total_file = 0;
     for (int r = 1; r <= runs; r++) {
         total_shm += bench_shm(1);

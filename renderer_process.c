@@ -1,4 +1,5 @@
 #include "shared.h"
+#include <sys/select.h>
 
 // =========================================================================
 // INTERRUPTOR MANUAL DE SALIDA GRÁFICA (Test 1B)
@@ -67,7 +68,8 @@ int main() {
     int win_width = shm->map_width * TILE_SIZE;
     int win_height = (shm->map_height * TILE_SIZE) + UI_TOP + UI_BOTTOM;
     
-    SDL_Window* window = SDL_CreateWindow("Pac-Man POSIX GUI - Arcade Perfect", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_width, win_height, SDL_WINDOW_RESIZABLE);
+    SDL_Window* window = SDL_CreateWindow("Pac-Man POSIX GUI - Arcade Perfect", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_width, win_height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
+    SDL_RaiseWindow(window);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     SDL_RenderSetLogicalSize(renderer, win_width, win_height);
 
@@ -179,85 +181,15 @@ int main() {
         SDL_RenderPresent(renderer);
         SDL_Delay(20);
     }
-    sem_post(&shm->sem_ready_done); 
-    output_text("\033[?1049h\033[2J");     
-    
-    char display_init[20][20]; 
-    memcpy(display_init, shm->map_grid, sizeof(display_init));
-    
-    pthread_mutex_lock(&shm->mutex_pacman_state);
-    int init_px = shm->pacman_init_x, init_py = shm->pacman_init_y;
-    int local_dots[20][20]; memcpy(local_dots, shm->dots_eaten, sizeof(local_dots));
-#ifdef ENABLE_POWER_PELLETS
-    int local_power[20][20]; memcpy(local_power, shm->power_pellets, sizeof(local_power));
+    sem_post(&shm->sem_ready_done);
 #endif
-    pthread_mutex_unlock(&shm->mutex_pacman_state);
-
-    pthread_mutex_lock(&shm->mutex_game_state);
-    int local_tombstones[20][20]; memcpy(local_tombstones, shm->tombstones, sizeof(local_tombstones));
-    pthread_mutex_unlock(&shm->mutex_game_state);
-
-    pthread_mutex_lock(&shm->mutex_ghost_state);
-    char gc_init[4] = {'A', 'B', 'C', 'D'};
-    int init_gx[4], init_gy[4];
-    for(int i = 0; i < 4; i++) { 
-        init_gx[i] = shm->ghost_init_x[i]; init_gy[i] = shm->ghost_init_y[i]; 
-    }
-    pthread_mutex_unlock(&shm->mutex_ghost_state);
-
-    if(init_px >= 0 && init_py >= 0) display_init[init_py][init_px] = 'P';
-    for(int i = 0; i < 4; i++) {
-        if(init_gx[i] >= 0 && init_gy[i] >= 0) display_init[init_gy[i]][init_gx[i]] = gc_init[i];
-    }
-    
-    char init_buffer[65536]; int ipos = 0;
-    ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "\033[H%s=== PAC-MAN POSIX CONCURRENT ===%s\n\n", COLOR_INFO, COLOR_RESET);
-    for(int y = 0; y < shm->map_height; y++) {
-        for(int x = 0; x < shm->map_width; x++) {
-            char c = display_init[y][x];
-            switch(c) {
-                case 'P': ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s%c%s", COLOR_PACMAN, c, COLOR_RESET); break;
-                case 'A': ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s%c%s", COLOR_BLINKY, c, COLOR_RESET); break;
-                case 'B': ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s%c%s", COLOR_PINKY,  c, COLOR_RESET); break;
-                case 'C': ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s%c%s", COLOR_INKY,   c, COLOR_RESET); break;
-                case 'D': ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s%c%s", COLOR_CLYDE,  c, COLOR_RESET); break;
-                case 'X': ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s█%s", shm->is_caso4 ? COLOR_WALL_CASO4 : COLOR_WALL, COLOR_RESET); break;
-                case 'O': 
-#ifdef ENABLE_POWER_PELLETS
-                    if (local_power[y][x]) {
-                        ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s●%s", COLOR_POWER, COLOR_RESET); 
-                        break;
-                    }
+#ifndef MODO_GRAFICO_SDL
+    output_text("\033[?1049h\033[2J");
+    sem_post(&shm->sem_ready_done);
 #endif
-                    if (local_tombstones[y][x]) ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "\033[38;2;139;69;19m+\033[0m");
-                    else if (local_dots[y][x] == 0) ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%s.%s",  COLOR_PATH,   COLOR_RESET); 
-                    else ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, " ");
-                    break;
-                default:  ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "%c", c); break;
-            }
-        }
-        ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "\n");
-    }
-    ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "\n⏱️  Tick: 000 | 🏆 Score: 0000 | ❤️  Lives: 3\033[K\n");
-    ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "⚡ P0: -- | ⚡ P1: -- | ⚡ P2: --\033[K\n");
-    ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "📌 Status: %sREADY!%s\033[K\n", COLOR_PACMAN, COLOR_RESET);
-    ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "\n--- Movement History ---\n%sPac-Man (P):%s\n%sBlinky  (A):%s\n%sPinky   (B):%s\n%sInky    (C):%s\n%sClyde   (D):%s\n", COLOR_PACMAN, COLOR_RESET, COLOR_BLINKY, COLOR_RESET, COLOR_PINKY, COLOR_RESET, COLOR_INKY, COLOR_RESET, COLOR_CLYDE, COLOR_RESET);
-    
-    if (shm->is_caso4) {
-        ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "\n--- Ghost Status ---\n%sBlinky  (A):%s Active                    \n%sPinky   (B):%s Active                    \n%sInky    (C):%s Active                    \n%sClyde   (D):%s Active                    \n", COLOR_BLINKY, COLOR_RESET, COLOR_PINKY, COLOR_RESET, COLOR_INKY, COLOR_RESET, COLOR_CLYDE, COLOR_RESET);
-        ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "\n--- Kill Feed ---\n1st 💀: --\n2nd 💀: --\n3rd 💀: --\n4th 💀: --\n                                                                      \n");
-    } else {
-        ipos += snprintf(init_buffer + ipos, sizeof(init_buffer) - ipos, "\n--- Lost Lives ---\n1st 💔: --\n2nd 💔: --\n3rd 💔: --\n                                                                      \n");
-    }
-
-    output_text(init_buffer);
-    
-    struct timespec initial_delay = { .tv_sec = 0, .tv_nsec = TICK_DELAY_MS * 1000000L };
-    nanosleep(&initial_delay, NULL);
-
-    sem_post(&shm->sem_ready_done); 
+#ifndef MODO_GRAFICO_SDL
+    static char last_ansi_frame[65536] = "";
 #endif
-    
     int over = 0;
     while (1) {
         sem_wait(&shm->sem_renderer_turn);
@@ -313,6 +245,13 @@ int main() {
         int gx[4], gy[4];
         for(int i = 0; i < 4; i++) { gx[i] = shm->ghost_x[i]; gy[i] = shm->ghost_y[i]; }
         pthread_mutex_unlock(&shm->mutex_ghost_state);
+
+        {
+            int fc = (px < 0 || px >= shm->map_width || py < 0 || py >= shm->map_height);
+            for (int i = 0; i < 4; i++)
+                if (gx[i] < 0 || gx[i] >= shm->map_width || gy[i] < 0 || gy[i] >= shm->map_height) fc = 1;
+            if (fc) shm->render_errors++;
+        }
 
         if (px > px_old) pacman_direction = 0;
         else if (px < px_old) pacman_direction = 1;
@@ -413,6 +352,8 @@ int main() {
                     char score_str[32]; sprintf(score_str, "%04d", score);
                     render_text_ttf(renderer, font_small, "SCORE", 16, 10, white, 0);
                     render_text_ttf(renderer, font_small, score_str, 16, 34, white, 0);
+                    render_text_ttf(renderer, font_small, "HIGH SCORE", win_width - 16, 10, white, 1);
+                    render_text_ttf(renderer, font_small, "6700", win_width - 16, 34, white, 1);
                 }
                 for(int i = 0; i < current_lives; i++) {
                     SDL_Rect life_rect = { 16 + (i * 32), win_height - 40, 24, 24 };
@@ -536,6 +477,13 @@ int main() {
         }
         pthread_mutex_unlock(&shm->mutex_ghost_state);
 
+        {
+            int fc = (px < 0 || px >= shm->map_width || py < 0 || py >= shm->map_height);
+            for (int i = 0; i < 4; i++)
+                if (gx[i] < 0 || gx[i] >= shm->map_width || gy[i] < 0 || gy[i] >= shm->map_height) fc = 1;
+            if (fc) shm->render_errors++;
+        }
+
         if(px >= 0 && py >= 0) display[py][px] = 'P';
         for(int i = 0; i < 4; i++) {
             if(gx[i] >= 0 && gy[i] >= 0 && !is_dead[i]) {
@@ -620,6 +568,7 @@ int main() {
         
         pos += snprintf(frame_buffer + pos, sizeof(frame_buffer) - pos, "\033[K\n");
 
+        strncpy(last_ansi_frame, frame_buffer, sizeof(last_ansi_frame)-1);
         output_text(frame_buffer);
         
         if (is_dying && current_lives > 0) {
@@ -705,6 +654,7 @@ int main() {
                 }
             }
             
+            strncpy(last_ansi_frame, respawn_buffer, sizeof(last_ansi_frame)-1);
             output_text(respawn_buffer);
             
             struct timespec respawn_delay = { .tv_sec = 0, .tv_nsec = TICK_DELAY_MS * 1000000L };
@@ -801,56 +751,74 @@ CLEANUP:
     while (shm->sim_time_ms == 0.0 && wait_cnt++ < 100) usleep(1000);
     
     char finish_buf[1024];
-    int fpos = 0;
-    fpos += snprintf(finish_buf + fpos, sizeof(finish_buf) - fpos,
+    snprintf(finish_buf, sizeof(finish_buf),
         "\n%s=====================================================================%s\n"
         "%s🏆 PARTIDA FINALIZADA CON ÉXITO%s\n"
-        "%s=====================================================================%s\n"
-        "⏰  Tiempo neto de simulación          : %s%.2f ms%s\n"
-        "🔥  Operaciones concurrentes procesadas : %s%lld%s\n"
         "%s=====================================================================%s\n\n"
         "👉 Presiona %s[M]%s y ENTER para ver la PANTALLA OFICIAL DE 8 MÉTRICAS.\n"
         "👉 O presiona %s[ENTER]%s directamente para salir a tu terminal WSL...\n",
         COLOR_INFO, COLOR_RESET, COLOR_PACMAN, COLOR_RESET, COLOR_INFO, COLOR_RESET,
-        COLOR_POWER, shm->sim_time_ms, COLOR_RESET,
-        COLOR_SUCCESS, (long long)shm->stress_counter, COLOR_RESET,
-        COLOR_INFO, COLOR_RESET,
         COLOR_PACMAN, COLOR_RESET, COLOR_BLINKY, COLOR_RESET);
     output_text(finish_buf);
     
 #ifndef AUTOMATED_BENCHMARK
     if (isatty(STDIN_FILENO)) {
-        char ch = getchar();
-        if (ch == 'M' || ch == 'm') {
+        int current_screen = 0; // 0 = Mapa, 1 = Métricas
+        while (1) {
+            fd_set readfds;
+            struct timeval tv = { .tv_sec = 10, .tv_usec = 0 };
+            FD_ZERO(&readfds);
+            FD_SET(STDIN_FILENO, &readfds);
+            if (select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv) <= 0) break;
+            int ch = getchar();
+            if (ch == '\n' || ch == EOF) {
+                break; // Salir a terminal WSL
+            }
             if (ch != '\n') { int c; while((c = getchar()) != '\n' && c != EOF); }
-            char metrics_buf[2048];
-            snprintf(metrics_buf, sizeof(metrics_buf),
-                "\033[2J\033[H\n"
-                "%s=====================================================================%s\n"
-                "%s   PANTALLA OFICIAL DE 8 MÉTRICAS DE RENDIMIENTO (RIGOR CIENTÍFICO)  %s\n"
-                "%s=====================================================================%s\n\n"
-                "  %s1. Tiempo Interno de Simulación%s : %.2f ms\n"
-                "  %s2. Tiempo Real Total (Wall Clock)%s : %.4f s\n"
-                "  %s3. Tiempo CPU en Modo Usuario%s   : %.4f s\n"
-                "  %s4. Tiempo CPU en Modo Kernel%s    : %.4f s\n"
-                "  %s5. Consumo Máximo RAM (RSS)%s     : %ld KB\n"
-                "  %s6. Cambios Contexto Voluntarios%s : %ld\n"
-                "  %s7. Cambios Contexto Involuntarios%s : %ld\n"
-                "  %s8. Integridad de Datos (Ops)%s    : %lld / %lld\n\n"
-                "%s=====================================================================%s\n"
-                "Presiona ENTER para salir definitivamente y volver a la terminal WSL...\n",
-                COLOR_INFO, COLOR_RESET, COLOR_PACMAN, COLOR_RESET, COLOR_INFO, COLOR_RESET,
-                COLOR_POWER, COLOR_RESET, shm->sim_time_ms,
-                COLOR_POWER, COLOR_RESET, shm->wall_clock_s,
-                COLOR_POWER, COLOR_RESET, shm->user_cpu_s,
-                COLOR_POWER, COLOR_RESET, shm->sys_cpu_s,
-                COLOR_POWER, COLOR_RESET, shm->max_rss_kb,
-                COLOR_POWER, COLOR_RESET, shm->vol_context_switches,
-                COLOR_POWER, COLOR_RESET, shm->invol_context_switches,
-                COLOR_SUCCESS, COLOR_RESET, (long long)shm->stress_counter, shm->expected_stress_ops,
-                COLOR_INFO, COLOR_RESET);
-            output_text(metrics_buf);
-            getchar();
+            
+            if ((ch == 'M' || ch == 'm') && current_screen == 0) {
+                current_screen = 1;
+                char metrics_buf[4096];
+                snprintf(metrics_buf, sizeof(metrics_buf),
+                    "\033[2J\033[H\n"
+                    "%s=====================================================================%s\n"
+                    "%s   PANTALLA OFICIAL DE 9 MÉTRICAS DE RENDIMIENTO (RIGOR CIENTÍFICO)  %s\n"
+                    "%s=====================================================================%s\n\n"
+                    "  %s1. Tiempo Interno de Simulación%s : %.2f ms\n"
+                    "  %s2. Tiempo Real Total (Wall Clock)%s : %.4f s\n"
+                    "  %s3. Tiempo CPU en Modo Usuario%s   : %.4f s\n"
+                    "  %s4. Tiempo CPU en Modo Kernel%s    : %.4f s\n"
+                    "  %s5. Consumo Máximo RAM (RSS)%s     : %ld KB\n"
+                    "  %s6. Cambios Contexto Voluntarios%s : %ld\n"
+                    "  %s7. Cambios Contexto Involuntarios%s : %ld\n"
+                    "  %s8. Integridad de Datos (Ops)%s    : %lld / %lld (%.1f%%)\n"
+                    "  %s9. Fallos de Renderizado%s         : %lld frames\n\n"
+                    "%s=====================================================================%s\n"
+                    "👉 Presiona %s[V]%s y ENTER para Volver a ver el mapa de la partida.\n"
+                    "👉 O presiona %s[ENTER]%s para salir definitivamente a tu terminal WSL...\n",
+                    COLOR_INFO, COLOR_RESET, COLOR_PACMAN, COLOR_RESET, COLOR_INFO, COLOR_RESET,
+                    COLOR_POWER, COLOR_RESET, shm->sim_time_ms,
+                    COLOR_POWER, COLOR_RESET, shm->wall_clock_s,
+                    COLOR_POWER, COLOR_RESET, shm->user_cpu_s,
+                    COLOR_POWER, COLOR_RESET, shm->sys_cpu_s,
+                    COLOR_POWER, COLOR_RESET, shm->max_rss_kb,
+                    COLOR_POWER, COLOR_RESET, shm->vol_context_switches,
+                    COLOR_POWER, COLOR_RESET, shm->invol_context_switches,
+                    COLOR_SUCCESS, COLOR_RESET, (long long)shm->stress_counter, shm->expected_stress_ops,
+                    (shm->expected_stress_ops > 0
+                        ? (double)shm->stress_counter / shm->expected_stress_ops * 100.0
+                        : 0.0),
+                    COLOR_SUCCESS, COLOR_RESET, shm->render_errors,
+                    COLOR_INFO, COLOR_RESET,
+                    COLOR_PACMAN, COLOR_RESET, COLOR_BLINKY, COLOR_RESET);
+                output_text(metrics_buf);
+            } else if ((ch == 'V' || ch == 'v') && current_screen == 1) {
+                current_screen = 0;
+                output_text(last_ansi_frame);
+                output_text(finish_buf);
+            } else {
+                break; // Cualquier otra tecla sale
+            }
         }
     }
 #endif

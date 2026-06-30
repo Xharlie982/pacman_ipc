@@ -278,12 +278,14 @@ int main(int argc, char *argv[]) {
 
     int successful_runs = 0;
     long long total_stress_ops = 0;
+    long long total_render_errors = 0;
     double total_elapsed_ms = 0.0;
 
     for (int run = 1; run <= PROGRAM_RUNS; run++) {
         shm->global_tick = 0; shm->max_ticks = MAX_TICKS;
         shm->game_over = 0; shm->pacman_score = 0; shm->pacman_lives = 3; shm->sim_time_ms = 0.0;
         shm->stress_counter = 0;
+        shm->render_errors = 0;
         shm->just_died = 0; shm->death_count = 0; shm->pacman_history[0] = '\0';
         shm->kill_feed_count = 0;
 
@@ -300,13 +302,13 @@ int main(int argc, char *argv[]) {
 #endif
 
         shm->use_dynamic_priority = (strstr(argv[1], "caso3") != NULL || strstr(argv[1], "caso4") != NULL) ? 1 : 0;
-        shm->p0_priority = 30;
+        shm->p0_priority = 40;
 #ifdef GHOSTS_FIRST_PRIORITY
         shm->pacman_priority = 1; shm->enemy_priority = 10;
 #elif defined(P0_LOWEST_PRIORITY)
         shm->p0_priority = 5; shm->pacman_priority = 15; shm->enemy_priority = 25;
 #else
-        if (strstr(argv[1], "caso3") != NULL) { shm->pacman_priority = 20; shm->enemy_priority = 30; } 
+        if (strstr(argv[1], "caso3") != NULL) { shm->pacman_priority = 20; shm->enemy_priority = 30; }
         else { shm->pacman_priority = 30; shm->enemy_priority = 30; }
 #endif
         
@@ -361,10 +363,11 @@ int main(int argc, char *argv[]) {
         waitpid(pid_p3, NULL, 0);
 
         total_stress_ops += shm->stress_counter;
+        total_render_errors += shm->render_errors;
         if (shm->game_over) successful_runs++;
 
         if (PROGRAM_RUNS == 1) {
-            char time_buf[1024];
+            char time_buf[2048];
             snprintf(time_buf, sizeof(time_buf),
                 "\n=====================================================================\n"
                 "🏆  MÉTRICAS OFICIALES DE RENDIMIENTO (TABLA FINAL)\n"
@@ -376,11 +379,16 @@ int main(int argc, char *argv[]) {
                 "5. Consumo Máximo Memoria RAM (RSS)  : %ld KB\n"
                 "6. Cambios Contexto Voluntarios      : %ld\n"
                 "7. Cambios Contexto Involuntarios    : %ld\n"
-                "8. Integridad Datos (Ops procesadas) : %lld / %lld\n"
+                "8. Integridad Datos (Ops procesadas) : %lld / %lld (%.1f%%)\n"
+                "9. Fallos de Renderizado Detectados  : %lld frames\n"
                 "=====================================================================\n",
                 shm->sim_time_ms, shm->wall_clock_s, shm->user_cpu_s, shm->sys_cpu_s,
                 shm->max_rss_kb, shm->vol_context_switches, shm->invol_context_switches,
-                (long long)shm->stress_counter, shm->expected_stress_ops);
+                (long long)shm->stress_counter, shm->expected_stress_ops,
+                (shm->expected_stress_ops > 0
+                    ? (double)shm->stress_counter / shm->expected_stress_ops * 100.0
+                    : 0.0),
+                shm->render_errors);
             print_consola(time_buf);
         }
 
@@ -397,8 +405,21 @@ int main(int argc, char *argv[]) {
     }
 
     if (PROGRAM_RUNS > 1) {
-        char sum_buf[512];
-        snprintf(sum_buf, sizeof(sum_buf), "\n=====================================================================\n⏰ RESULTADO PRUEBA DE ESTRÉS INTEGRADA (%d Ejecuciones x 100,000 Iteraciones)\nEjecuciones completadas exitosamente : %d/%d\nTiempo acumulado total               : %.2f ms\nOperaciones de estrés registradas    : %lld\n=====================================================================\n", PROGRAM_RUNS, successful_runs, PROGRAM_RUNS, total_elapsed_ms, total_stress_ops);
+        char sum_buf[1024];
+        snprintf(sum_buf, sizeof(sum_buf),
+            "\n=====================================================================\n"
+            "⏰ RESULTADO PRUEBA DE ESTRÉS INTEGRADA (%d Ejecuciones x 100,000 Iteraciones)\n"
+            "Ejecuciones completadas exitosamente : %d/%d\n"
+            "Tiempo acumulado total               : %.2f ms\n"
+            "Operaciones de estrés registradas    : %lld / %lld (%.1f%%)\n"
+            "Fallos de renderizado acumulados     : %lld frames\n"
+            "=====================================================================\n",
+            PROGRAM_RUNS, successful_runs, PROGRAM_RUNS, total_elapsed_ms,
+            total_stress_ops, (long long)PROGRAM_RUNS * shm->expected_stress_ops,
+            (shm->expected_stress_ops > 0
+                ? (double)total_stress_ops / ((double)PROGRAM_RUNS * shm->expected_stress_ops) * 100.0
+                : 0.0),
+            total_render_errors);
         print_consola(sum_buf);
     }
 
