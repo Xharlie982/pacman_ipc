@@ -140,6 +140,7 @@ typedef struct {
     long invol_context_switches;
     volatile long long stress_counter;
     long long expected_stress_ops;
+    volatile long long render_errors;
     
     sem_t sem_tick_start, sem_scheduler_start, sem_signal_start, sem_pacman_turn, sem_enemy_turn;
     sem_t sem_turn_finished, sem_check_collision, sem_collision_checked, sem_renderer_turn, sem_renderer_done;

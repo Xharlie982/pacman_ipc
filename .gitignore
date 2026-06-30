@@ -1,4 +1,14 @@
-echo "scheduler_process" >> .gitignore
-echo "pacman_process" >> .gitignore
-echo "enemy_process" >> .gitignore
-echo "renderer_process" >> .gitignore
+# Binarios compilados
+scheduler_process
+pacman_process
+enemy_process
+renderer_process
+ipc_benchmark
+
+# Configuración local de Claude Code
+.claude/
+CLAUDE.md
+
+# Archivos de resultados de tests (generados por run_all_tests.sh)
+resultados_tests.txt
+resultados_tests.csv

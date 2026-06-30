@@ -6,293 +6,216 @@
 
 ## Descripción General
 
-Este proyecto implementa una simulación del videojuego Pac-Man utilizando exclusivamente primitivas POSIX de bajo nivel: procesos independientes (`fork`/`exec`), memoria compartida (`shm_open`), semáforos (`sem_open`) y pipes anónimos. El sistema se compone de cuatro procesos independientes que cooperan en tiempo real:
+Este proyecto implementa una simulación del videojuego Pac-Man utilizando exclusivamente primitivas POSIX de bajo nivel: procesos independientes (`fork`/`exec`), memoria compartida (`shm_open`), semáforos (`sem_open`) y mutex POSIX. El sistema se compone de cuatro procesos independientes que cooperan en tiempo real a través de un segmento de memoria compartida (`/pacman_shm_game`):
 
 | Proceso | Archivo fuente | Responsabilidad |
 |---|---|---|
-| **Planificador** | `scheduler_process.c` | Orquesta la ejecución mediante Round-Robin y gestiona casos de prueba |
-| **Pac-Man** | `pacman_process.c` | Controla el movimiento del jugador y la lógica de puntuación |
-| **Enemigos** | `enemy_process.c` | Administra el comportamiento de los fantasmas |
-| **Renderizador** | `renderer_process.c` | Dibuja el estado del juego (terminal ANSI o ventana SDL2) |
+| **P0 — Planificador** | `scheduler_process.c` | Orquesta Round-Robin, gestiona el reloj maestro y recolecta 8 métricas de kernel vía `getrusage()` |
+| **P1 — Pac-Man** | `pacman_process.c` | Controla el movimiento del jugador mediante patrón productor-consumidor con hilos internos |
+| **P2 — Enemigos** | `enemy_process.c` | Administra 4 hilos de fantasmas concurrentes (Blinky, Pinky, Inky, Clyde) |
+| **P3 — Renderizador** | `renderer_process.c` | Dibuja cada frame en terminal ANSI o ventana SDL2 con menú interactivo al finalizar |
 
-La arquitectura completa se define en **`shared.h`**, que centraliza estructuras de datos, constantes y macros de configuración compartidas entre todos los procesos.
+La arquitectura completa se define en **`shared.h`**, que centraliza estructuras de datos, semáforos, mutex y macros de configuración compartidas entre todos los procesos.
 
 ---
 
 ## Requisitos del Sistema
 
 - **Sistema operativo:** Ubuntu 22.04 LTS o superior / WSL2 con Ubuntu
-- **Compilador:** GCC 11 o superior
-- **Estándar C:** C11 (`-std=c11`)
-- **Bibliotecas opcionales:** SDL2, SDL2_image, SDL2_ttf (requeridas únicamente para el modo gráfico)
+- **Compilador:** GCC 11 o superior con soporte C11 (`-std=c11`)
+- **Bibliotecas opcionales:** SDL2, SDL2\_image, SDL2\_ttf (solo para modo gráfico)
 
 ---
 
 ## 1. Instalación de Dependencias
-
-Antes de compilar el proyecto, asegúrese de que el sistema esté actualizado y de que todas las herramientas y bibliotecas necesarias estén instaladas. Ejecute los siguientes comandos en la terminal de Ubuntu o WSL2:
 
 ```bash
 sudo apt update
 sudo apt install build-essential libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
 ```
 
-- **`build-essential`** — Instala GCC, G++ y Make, indispensables para compilar código C.
-- **`libsdl2-dev`** — Biblioteca principal de SDL2 para gráficos, entrada y audio.
-- **`libsdl2-image-dev`** — Extensión de SDL2 para carga de imágenes (PNG, JPG, etc.).
-- **`libsdl2-ttf-dev`** — Extensión de SDL2 para renderizado de fuentes TrueType.
-
-> **Nota:** Si trabaja en WSL2, asegúrese de contar con un servidor X11 activo (por ejemplo, VcXsrv o X410) y de tener configurada correctamente la variable de entorno `DISPLAY` para poder visualizar ventanas gráficas.
+> **Nota WSL2:** Si usa el modo gráfico SDL2 desde Windows, necesita un servidor X11 activo (VcXsrv o X410) con la variable `DISPLAY` configurada.
 
 ---
 
 ## 2. Compilación del Proyecto
 
-La compilación se gestiona mediante el **`Makefile`** incluido en el repositorio. Para compilar el proyecto desde cero, o para recompilar después de realizar cualquier modificación en los interruptores de arquitectura descritos en la sección 4, ejecute siempre el siguiente comando:
-
 ```bash
 make clean && make
 ```
 
-- **`make clean`** — Elimina todos los objetos compilados anteriores (archivos `.o`) y los binarios generados, garantizando una compilación limpia sin artefactos obsoletos.
-- **`make`** — Compila el código fuente completo y genera el ejecutable `scheduler_process`.
-
-> **Importante:** Cada vez que modifique una macro del preprocesador (como `ENABLE_POWER_PELLETS` o `MODO_GRAFICO_SDL`), es **obligatorio** ejecutar `make clean && make` para que los cambios surtan efecto. Una compilación incremental sin limpiar puede producir un binario inconsistente que no refleje la configuración deseada.
+> **Importante:** Cada vez que cambie una macro del preprocesador, ejecute `make clean && make` obligatoriamente. Una compilación incremental sin limpiar puede producir un binario inconsistente.
 
 ---
 
 ## 3. Ejecución de los Casos de Prueba
 
-El proyecto incluye cuatro casos de prueba predefinidos, ubicados en el directorio `cases/`, que permiten evaluar distintos escenarios de planificación y concurrencia. Cada caso se ejecuta pasando su ruta como argumento al planificador:
+El directorio `cases/` contiene cuatro escenarios predefinidos:
 
 ### Caso 1 — Sincronización Base Round-Robin
-
 ```bash
 ./scheduler_process cases/caso1
 ```
+Evalúa la sincronización fundamental. Round-Robin equitativo entre P1 y P2. Baseline de integridad al 100%.
 
-Evalúa la sincronización fundamental entre procesos utilizando el algoritmo de planificación **Round-Robin**. Verifica que el quantum de tiempo se respete correctamente y que todos los procesos accedan a la memoria compartida sin condiciones de carrera.
-
----
-
-### Caso 2 — Inanición y Comportamiento Asíncrono
-
+### Caso 2 — Convergencia Rápida
 ```bash
 ./scheduler_process cases/caso2
 ```
-
-Simula un escenario donde uno o más procesos experimentan **inanición** (_starvation_) debido a la naturaleza asíncrona de las operaciones concurrentes. Permite observar cómo el planificador maneja situaciones en las que un proceso no recibe tiempo de CPU de forma equitativa.
-
----
+Escenario donde el juego termina pronto (fantasmas alcanzan a Pac-Man). Permite observar comportamiento bajo tiempo de vida reducido.
 
 ### Caso 3 — Inversión de Prioridades con `SET_PRIORITY`
-
 ```bash
 ./scheduler_process cases/caso3
 ```
+Activa la directiva `SET_PRIORITY` a mitad de la partida, cambiando dinámicamente las prioridades del planificador.
 
-Demuestra el fenómeno de **inversión de prioridades**, activando la directiva `SET_PRIORITY` para asignar niveles de prioridad diferenciados a los procesos. Evalúa si el planificador resuelve correctamente los conflictos de acceso a recursos compartidos entre procesos de distinta prioridad.
-
----
-
-### Caso 4 — Modo Cacería, Masacre de Fantasmas y Time Out
-
+### Caso 4 — Modo Cacería y Power Pellets
 ```bash
+make test14   # compila con ENABLE_POWER_PELLETS
 ./scheduler_process cases/caso4
 ```
-
-Activa el **modo de cacería** (_hunt mode_), en el que Pac-Man puede eliminar fantasmas durante un periodo limitado. Evalúa la lógica de inversión de roles, el contador de tiempo (_time out_) y la correcta contabilización de puntos por masacre.
-
-> ⚠️ **Dependencia crítica:** El `caso4` **no se ejecutará correctamente** a menos que la macro `ENABLE_POWER_PELLETS` esté activa en **`shared.h`** (línea 22). Si dicha macro permanece comentada, el sistema omitirá la lógica de cacería. Consulte la sección 4 para instrucciones de activación y posterior recompilación.
+> ⚠️ Requiere compilar con `ENABLE_POWER_PELLETS` activo (usar `make test14` o `make test15`).
 
 ---
 
-## 4. Guía de Testing — Interruptores de Arquitectura
+## 4. Interruptores de Arquitectura (Macros de Preprocesador)
 
-El proyecto ha sido diseñado con una arquitectura **modular y configurable** mediante macros del preprocesador de C. Este enfoque permite activar o desactivar subsistemas completos del juego editando únicamente dos líneas de código, sin necesidad de alterar la lógica principal. Esto facilita la evaluación progresiva e independiente de cada componente del sistema.
-
-Se pueden generar **4 configuraciones distintas** combinando los dos interruptores disponibles.
-
----
-
-### Interruptor 1 — Power Pellets
-
-**Ubicación:** **`shared.h`**, línea 22
-
-Este interruptor controla si el sistema incluye la lógica de _power pellets_ (píldoras de poder). Cuando está activo, Pac-Man puede ingerir una píldora especial que activa el modo de cacería durante un tiempo limitado, permitiéndole devorar fantasmas y sumar puntos adicionales.
-
-**Para activar:**
-```c
-#define ENABLE_POWER_PELLETS
-```
-
-**Para desactivar:**
-```c
-// #define ENABLE_POWER_PELLETS
-```
+| Macro / Flag | Efecto |
+|---|---|
+| `ENABLE_POWER_PELLETS` | Habilita power pellets y modo cacería (requerido para caso4) |
+| `MODO_GRAFICO_SDL` | Cambia renderer de ANSI a ventana SDL2 |
+| `DISABLE_SYNC` | Desactiva mutex compartidos → demuestra race conditions |
+| `ONLY_SEMAPHORES` | Desactiva solo mutex, mantiene semáforos |
+| `ONLY_MUTEX` | Desactiva solo semáforos → crash inmediato del scheduler |
+| `GHOSTS_FIRST_PRIORITY` | Fantasmas reciben todos los turnos de CPU |
+| `P0_LOWEST_PRIORITY` | Planificador con prioridad más baja |
+| `BUFFER_SIZE=N` | Cambia tamaño del buffer circular de P1 (default: 10) |
+| `USE_SYSCALL_WRITE` | Usa `write()` directo en lugar de `printf()` |
+| `STRESS_TEST` | Activa modo headless: 100 ejecuciones × 0 ms de delay |
 
 ---
 
-### Interruptor 2 — Interfaz Gráfica SDL2
+## 5. Suite de Tests Científicos (make test1–test15)
 
-**Ubicación:** **`renderer_process.c`**, línea 8
+Cada target compila los binarios con la configuración exacta. Uso: `make testN && ./scheduler_process cases/casoX`
 
-Este interruptor determina qué sistema de renderizado utiliza el proceso de visualización. Cuando está activo, el juego se muestra en una ventana gráfica SDL2. Cuando está desactivado, el renderizado se realiza directamente en la terminal mediante secuencias de escape **ANSI**.
-
-**Para activar (ventana SDL2):**
-```c
-#define MODO_GRAFICO_SDL
-```
-
-**Para desactivar (terminal ANSI):**
-```c
-// #define MODO_GRAFICO_SDL
-```
-
----
-
-### Configuraciones Disponibles
-
-A continuación se describen los cuatro escenarios de prueba que el evaluador puede generar combinando ambos interruptores. Tras cada modificación, recuerde siempre recompilar con `make clean && make`.
-
----
-
-#### ① Versión Base
-
-| Macro | Estado | Atajo Modular |
+| Target | Configuración | Propósito científico |
 |---|---|---|
-| `ENABLE_POWER_PELLETS` | ❌ Desactivado | `make test1` |
-| `MODO_GRAFICO_SDL` | ❌ Desactivado | |
+| `make test1` | ANSI + sincronización completa | Baseline: integridad 100%, referencia para todos los demás |
+| `make test2` | SDL2 + sincronización completa | Cuantifica overhead del renderer gráfico (+20% wall clock) |
+| `make test3` | ANSI + `DISABLE_SYNC` | **Race conditions**: sin mutex → 56% de ops registradas en caso1 |
+| `make test4` | SDL2 + `DISABLE_SYNC` | Idem con renderer SDL2; pérdida similar (~62%) |
+| `make test5` | `ONLY_SEMAPHORES` | Solo semáforos no protegen datos: 58% integridad (≈ test3) |
+| `make test6` | `ONLY_MUTEX` | Sin semáforos el scheduler colapsa: **0% en 0.6 ms** |
+| `make test7` | `GHOSTS_FIRST_PRIORITY` | Inversión de prioridad: game over en ~6 ticks, 40% de ops |
+| `make test8` | `P0_LOWEST_PRIORITY` | Scheduler con menor prioridad: mismo efecto que test7 |
+| `make test9` | `BUFFER_SIZE=1` | Buffer mínimo: 100% integridad, más cambios de contexto |
+| `make test10` | `BUFFER_SIZE=20` | Buffer grande: 93.3% — race condition al vaciar buffer en fin de partida |
+| `make test11` | `USE_SYSCALL_WRITE` | write() vs printf(): más tiempo en modo kernel (CPU kernel sube) |
+| `make test12` | `STRESS_TEST` (sync) | 100 partidas × 6M ops esperadas: **100% acumulado** — integridad perfecta a escala |
+| `make test13` | `STRESS_TEST` + `DISABLE_SYNC` | 100 partidas × 6M ops: **52.6%** — pérdida de 285M ops por race conditions |
+| `make test14` | Power Pellets + ANSI | 133.3% de ops: pellets añaden turnos extra de fantasmas |
+| `make test15` | Power Pellets + SDL2 | 133.3% consistente — confirma independencia del renderer |
 
-La configuración mínima del sistema. El juego se ejecuta íntegramente en la **terminal ANSI**, sin soporte gráfico ni lógica de poderes.
+### Interpretación de la Integridad (%)
+
+```
+Integridad = ops_stress_registradas / ops_stress_esperadas × 100
+```
+
+- **100%** → sincronización perfecta, ningún dato perdido
+- **<100%** → race conditions activos, escrituras concurrentes se solapan
+- **0%** → crash antes del primer tick (sin semáforos de turno)
+- **>100%** → power pellets generan turnos adicionales no contemplados en expected
+
+---
+
+## 6. Script de Ejecución Automatizada
 
 ```bash
-make test1
-./scheduler_process cases/caso1
+./run_all_tests.sh
 ```
+
+Ejecuta los 15 tests secuencialmente con pausa interactiva entre casos. Genera dos archivos:
+
+- `resultados_tests.txt` — log legible con todas las métricas oficiales
+- `resultados_tests.csv` — datos estructurados por filas para importar en Python/Excel
+
+**Columnas del CSV:**
+`test_num, test_desc, caso, sim_time_ms, wall_clock_s, cpu_user_s, cpu_kernel_s, max_rss_kb, ctx_vol, ctx_invol, ops_actual, ops_esperadas, integridad_pct, render_errors`
+
+Al terminar los 15 tests, el script pregunta si ejecutar el benchmark IPC.
 
 ---
 
-#### ② Versión Base + Power Pellets
-
-| Macro | Estado | Atajo Modular |
-|---|---|---|
-| `ENABLE_POWER_PELLETS` | ✅ Activado | `make test_bonus` o `make test1 POWER=1` |
-| `MODO_GRAFICO_SDL` | ❌ Desactivado | |
-
-Habilita la lógica completa de _power pellets_ y modo cacería en terminal ANSI.
+## 7. Benchmark IPC — Justificación Empírica de mmap()
 
 ```bash
-make test1 POWER=1
-./scheduler_process cases/caso4
+make ipc_benchmark && ./ipc_benchmark
 ```
 
----
+Compara tres mecanismos de IPC en 10 ejecuciones × 100,000 operaciones cada una:
 
-#### ③ Versión Base + SDL2
-
-| Macro | Estado | Atajo Modular |
+| Mecanismo | Throughput promedio | Latencia promedio |
 |---|---|---|
-| `ENABLE_POWER_PELLETS` | ❌ Desactivado | `make test1 SDL=1` |
-| `MODO_GRAFICO_SDL` | ✅ Activado | |
+| **POSIX Shared Memory (mmap)** | 23,923 ops/seg | 4,180 ms |
+| POSIX Pipes (read/write) | 17,394 ops/seg | 5,749 ms |
+| Archivo en disco (lseek) | 17,041 ops/seg | 5,868 ms |
 
-Activa el renderizado en **ventana gráfica SDL2 (redimensionable y auto-escalable)**.
-
-```bash
-make test1 SDL=1
-./scheduler_process cases/caso1
-```
+**mmap es 1.37× más rápido que pipes y 1.40× más rápido que archivo en disco**, justificando científicamente la elección de memoria compartida como mecanismo IPC del proyecto.
 
 ---
 
-#### ④ Versión Completa (SDL2 + Power Pellets)
+## 8. Registro Completo de Primitivas POSIX
 
-| Macro | Estado | Atajo Modular |
-|---|---|---|
-| `ENABLE_POWER_PELLETS` | ✅ Activado | `make test1 SDL=1 POWER=1` |
-| `MODO_GRAFICO_SDL` | ✅ Activado | |
+### Hilos POSIX (`pthread_t`) por Proceso
 
-La **experiencia arcade completa** que activa simultáneamente gráficos SDL2 y poderes.
+| Proceso | Hilos |
+|---|---|
+| P0 Planificador | `main`, `p0_tick_thread`, `p0_scheduler_thread`, `p0_signal_thread` |
+| P1 Pac-Man | `main`, `p1_movement_reader` (productor), `p1_movement_executor` (consumidor), `p1_pacman_publisher` |
+| P2 Enemigos | `main`, `p2_controller_thread`, `p2_tracker_thread`, `p2_collision_thread`, `p2_ghost_thread` ×4 |
+| P3 Renderizador | `main` (bucle de render) |
 
-```bash
-make test1 SDL=1 POWER=1
-./scheduler_process cases/caso4
-```
+### Semáforos POSIX en Memoria Compartida (`sem_t`)
 
----
+`sem_tick_start` → `sem_scheduler_start` → `sem_pacman_turn` / `sem_enemy_turn` → `sem_turn_finished` → `sem_check_collision` / `sem_collision_checked` → `sem_renderer_turn` → `sem_renderer_done`
 
-## 5. Registro Completo de Concurrencia e IPC
+Más: `sem_signal_start`, `sem_ready_done`
 
-A continuación se detalla el inventario riguroso de todos los hilos POSIX, semáforos, mutex y variables de condición implementados por componente:
+### Mutex POSIX (`pthread_mutex_t`)
 
-### 🧵 Hilos POSIX (`pthread_t`) por Proceso
-1. **Planificador (`scheduler_process.c` - P0)**:
-   - `main`: Hilo principal de inicialización y sincronización general.
-   - `p0_tick_thread`: Generador del reloj maestro (ticks del juego).
-   - `p0_scheduler_thread`: Árbitro Round-Robin y asignador de turnos de CPU.
-   - `p0_signal_thread`: Receptor asíncrono de comandos y señales directas.
-2. **Pac-Man (`pacman_process.c` - P1)**:
-   - `main`: Hilo principal de control P1.
-   - `p1_movement_reader`: Productor que lee las instrucciones de movimiento (archivo/pipe).
-   - `p1_movement_executor`: Consumidor que procesa físicas y actualiza la posición del jugador.
-   - `p1_pacman_publisher`: Publicador del estado hacia la memoria compartida.
-3. **Enemigos (`enemy_process.c` - P2)**:
-   - `main`: Hilo principal de control P2.
-   - `p2_controller_thread`: Controlador general y receptor del turno de CPU.
-   - `p2_tracker_thread`: Evaluador de las coordenadas del jugador.
-   - `p2_collision_thread`: Monitor de colisiones físicas entre Pac-Man y fantasmas.
-   - `p2_ghost_thread` (x4 hilos): Inteligencia artificial concurrente independiente para `Blinky`, `Pinky`, `Inky` y `Clyde`.
-4. **Renderizador (`renderer_process.c` - P3)**:
-   - `main`: Bucle continuo de renderizado (terminal ANSI o motor SDL2).
+**En memoria compartida (bypasseables con `DISABLE_SYNC`):**
+`mutex_game_state`, `mutex_pacman_state`, `mutex_ghost_state`, `mutex_mailboxes`, `mutex_collisions`
 
-### 🚦 Semáforos POSIX en Memoria Compartida (`sem_t` en `shared.h`)
-- `sem_tick_start`: Dispara el inicio de un nuevo tick cronometrado.
-- `sem_scheduler_start`: Despierta al hilo planificador.
-- `sem_signal_start`: Sincroniza la recepción de señales externas.
-- `sem_pacman_turn`: Otorga el quantum de ejecución al proceso Pac-Man.
-- `sem_enemy_turn`: Otorga el quantum de ejecución al proceso Fantasmas.
-- `sem_turn_finished`: Notifica al planificador la culminación de un turno de CPU.
-- `sem_check_collision`: Ordena al hilo de colisiones realizar el cálculo físico.
-- `sem_collision_checked`: Confirma al planificador el término del chequeo de impacto.
-- `sem_renderer_turn`: Autoriza al renderizador a refrescar la pantalla.
-- `sem_renderer_done`: Confirma que el dibujo del fotograma ha terminado.
-- `sem_ready_done`: Sincronización de la pantalla inicial "READY!".
+**Locales a cada proceso (siempre activos):**
+`p1_mutex_buffer` (buffer circular P1), `p2_mutex_ghosts` (sincroniza acceso a posiciones de fantasmas), `p2_mutex_local`
 
-### 🔒 Mutex POSIX (`pthread_mutex_t`)
-- **En Memoria Compartida (`shared.h`)**:
-  - `mutex_game_state`: Candado global sobre el estado general (ticks, game over, score, vidas, grilla).
-  - `mutex_pacman_state`: Candado sobre las coordenadas e historial de movimientos del Pac-Man.
-  - `mutex_ghost_state`: Candado sobre coordenadas, orientaciones y temporizadores de los 4 fantasmas.
-  - `mutex_mailboxes`: Candado para lectura/escritura en buzones de comunicación IPC.
-  - `mutex_collisions`: Candado para reportar muertes y actualizar el *kill feed*.
-- **Internos de Procesos**:
-  - `p1_mutex_buffer` (`pacman_process.c`): Candado del búfer circular interno productor-consumidor.
-  - `p2_mutex_ghosts` (`enemy_process.c`): Candado interno de sincronización de hilos de fantasmas.
-  - `p2_mutex_local` (`enemy_process.c`): Candado de variables locales de control IA.
+### Variables de Condición (`pthread_cond_t`) en P1
 
-### 🛎️ Variables de Condición (`pthread_cond_t`)
-- **En `pacman_process.c`**:
-  - `p1_cond_not_empty`: Bloquea al consumidor hasta que haya comandos en el búfer circular.
-  - `p1_cond_not_full`: Bloquea al lector cuando el búfer circular alcanza su capacidad máxima.
+`p1_cond_not_empty` (bloquea consumidor), `p1_cond_not_full` (bloquea productor cuando buffer lleno)
 
 ---
 
 ## Estructura del Repositorio
 
 ```
-pacman_posix/
-├── shared.h                  # Definiciones globales, estructuras IPC y macros de configuración
-├── scheduler_process.c       # Proceso planificador (Round-Robin, gestión de casos)
-├── pacman_process.c          # Proceso Pac-Man (movimiento y puntuación)
-├── enemy_process.c           # Proceso de enemigos (comportamiento de fantasmas)
-├── renderer_process.c        # Proceso renderizador (ANSI / SDL2)
-├── ipc_benchmark.c           # Benchmark de IPC (SHM vs Pipes vs Archivos)
-├── Makefile                  # Sistema de compilación
+mi_pacman_sandbox/
+├── shared.h                  # Estructuras IPC, semáforos, mutex y macros
+├── scheduler_process.c       # P0: planificador Round-Robin + métricas kernel
+├── pacman_process.c          # P1: Pac-Man, productor-consumidor
+├── enemy_process.c           # P2: fantasmas, 4 hilos concurrentes + stress loop
+├── renderer_process.c        # P3: renderer ANSI/SDL2 + menú fin de partida
+├── ipc_benchmark.c           # Benchmark empírico: mmap vs pipes vs archivo
+├── run_all_tests.sh          # Script automatizado: 15 tests → .txt + .csv
+├── Makefile                  # 15 targets de test + run_benchmark
+├── .gitignore
 └── cases/
-    ├── caso1                 # Caso: Sincronización base Round-Robin
-    ├── caso2                 # Caso: Inanición y comportamiento asíncrono
-    ├── caso3                 # Caso: Inversión de prioridades con SET_PRIORITY
-    └── caso4                 # Caso: Modo cacería y Time Out (requiere ENABLE_POWER_PELLETS)
+    ├── caso1/                # Round-Robin base
+    ├── caso2/                # Convergencia rápida
+    ├── caso3/                # SET_PRIORITY dinámico
+    └── caso4/                # Power Pellets (requiere ENABLE_POWER_PELLETS)
 ```
 
 ---
@@ -300,17 +223,30 @@ pacman_posix/
 ## Resumen de Comandos Esenciales
 
 ```bash
-# 1. Instalar dependencias (una sola vez)
-sudo apt update && sudo apt install build-essential libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
+# Compilar desde cero
+make clean && make
 
-# 2. Compilar modularmente con atajos (Combinaciones libres de SDL=1 y POWER=1)
-make test1 SDL=1          # Caso Ideal en modo Gráfico SDL2
-make test1 POWER=1        # Caso Ideal con Power Pellets activados
-make test2 SDL=1 POWER=1  # Test sin sincronización con Gráficos y Poderes
+# Ejecutar un test (compilar + correr)
+make test1 && ./scheduler_process cases/caso1
+make test2 && ./scheduler_process cases/caso1   # SDL2
 
-# 3. Pruebas de Estrés Integradas (Sin interfaz visual, 100 Ejecuciones x 100,000 Iteraciones por turno)
-make test10               # Valida 100% de estabilidad y precisión con Mutex POSIX activo
-make test11               # Demuestra pérdida masiva de datos (Race Conditions) al apagar Mutex
+# Demostrar race conditions
+make test3 && ./scheduler_process cases/caso1   # sin mutex → ~56% integridad
+make test6 && ./scheduler_process cases/caso1   # sin semáforos → crash en 0.6 ms
+
+# Pruebas de estrés (100 partidas, headless, sin delay)
+make test12 && ./scheduler_process cases/caso1  # con sync → 100% acumulado
+make test13 && ./scheduler_process cases/caso1  # sin sync → 52.6% acumulado
+
+# Power pellets
+make test14 && ./scheduler_process cases/caso4  # ANSI, 133% ops
+make test15 && ./scheduler_process cases/caso4  # SDL2, 133% ops
+
+# Ejecutar todos los tests automáticamente
+./run_all_tests.sh
+
+# Benchmark IPC
+make ipc_benchmark && ./ipc_benchmark
 ```
 
 ---
