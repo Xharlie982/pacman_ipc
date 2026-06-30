@@ -147,6 +147,9 @@ Ejecuta los 15 tests secuencialmente con pausa interactiva entre casos. Genera d
 
 Al terminar los 15 tests, el script pregunta si ejecutar el benchmark IPC.
 
+**Visualización de resultados (Google Colab):**
+[Ver gráficas generadas con los datos del CSV](https://colab.research.google.com/drive/1ggvqJO4pFeRReUGOCMlg9PGrnv4Wsj0J?usp=sharing)
+
 ---
 
 ## 7. Benchmark IPC — Justificación Empírica de mmap()
