@@ -6,9 +6,9 @@
 #   ./scheduler_process cases/casoX  → ejecuta una partida con los binarios del testN
 #
 # FLAGS EXTRA COMBINABLES:
-#   SDL=1    → activa renderer SDL2 (en lugar de ANSI)
-#   POWER=1  → activa power pellets (solo para caso4)
-#   STRESS=1 → modo estrés (HEADLESS, 100 corridas, sin delay)
+#   SDL=1     → activa renderer SDL2 (en lugar de ANSI)
+#   POWER=1   → activa power pellets (solo para caso4)
+#   VISUAL=1  → 1 ejecución con delay 400ms, menú M/V interactivo (demo)
 # =========================================================================
 CC = gcc
 CFLAGS ?= -Wall -Wextra -pthread -g
@@ -21,8 +21,8 @@ endif
 ifeq ($(POWER),1)
     COMBO_FLAGS += -DENABLE_POWER_PELLETS
 endif
-ifeq ($(STRESS),1)
-    COMBO_FLAGS += -DSTRESS_TEST
+ifeq ($(VISUAL),1)
+    COMBO_FLAGS += -DVISUAL -DTICK_DELAY_MS=400
 endif
 
 ALL_CFLAGS = $(CFLAGS) $(COMBO_FLAGS)
@@ -98,15 +98,16 @@ test11:
 	$(MAKE) clean && $(MAKE) EXTRA_CFLAGS="-DUSE_SYSCALL_WRITE"
 
 # =========================================================================
-# PARTE 4 — VALIDACIÓN DE INTEGRIDAD (estrés, 100 corridas, HEADLESS)
-#   test12: CON sync → stress_counter/expected ≈ 100%
-#   test13: SIN sync → pérdida masiva de datos
+# PARTE 4 — VALIDACIÓN SIN RENDERIZADOR (HEADLESS)
+#   Igual que el resto (100 ejecuciones × 400k ops) pero sin P3.
+#   test12: CON sync  → integridad ≈ 100%
+#   test13: SIN sync  → pérdida masiva de datos demostrada
 # =========================================================================
 test12:
-	$(MAKE) clean && $(MAKE) STRESS=1
+	$(MAKE) clean && $(MAKE) EXTRA_CFLAGS="-DHEADLESS"
 
 test13:
-	$(MAKE) clean && $(MAKE) EXTRA_CFLAGS="-DDISABLE_SYNC" STRESS=1
+	$(MAKE) clean && $(MAKE) EXTRA_CFLAGS="-DDISABLE_SYNC -DHEADLESS"
 
 # =========================================================================
 # PARTE 5 — BONUS (ENABLE_POWER_PELLETS)
@@ -125,6 +126,18 @@ test15:
 # =========================================================================
 run_benchmark: ipc_benchmark
 	./ipc_benchmark
+
+# =========================================================================
+# UTILIDADES: ejecutar tests y limpiar resultados
+# =========================================================================
+run_tests:
+	chmod +x run_all_tests.sh && ./run_all_tests.sh
+
+run_tests_auto:
+	chmod +x run_all_tests.sh && ./run_all_tests.sh < /dev/null
+
+clean_csv:
+	rm -f resultados_tests.csv
 
 # =========================================================================
 # MEDICIÓN DE TIEMPO (ejecutar manualmente en WSL):

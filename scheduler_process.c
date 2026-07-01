@@ -123,7 +123,11 @@ void* p0_signal_thread(void* arg) {
         int turn = shm->current_turn;
         pthread_mutex_unlock(&shm->mutex_game_state); // 3. Libera el mutex
 
-        if (turn == 1) sem_post(&shm->sem_pacman_turn); else sem_post(&shm->sem_enemy_turn); // 4. Libera el semáforo
+        if (turn == 1) {
+            sem_post(&shm->sem_pacman_turn);
+        } else {
+            sem_post(&shm->sem_enemy_turn);
+        }
         sem_wait(&shm->sem_turn_finished); // 1. Espera a que P0 inicie el tick
         if (check_game_over_safe()) { p0_wake_all_clean(); break; }
 
@@ -278,13 +282,32 @@ int main(int argc, char *argv[]) {
 
     int successful_runs = 0;
     long long total_stress_ops = 0;
+    long long total_expected_ops = 0;
     long long total_render_errors = 0;
     double total_elapsed_ms = 0.0;
+    const char *max_proc_name = "P0 Planificador";
+    long max_proc_rss = 0;
+    long mem_total_kb = 0;
+
+#if defined(MODO_GRAFICO_SDL) || defined(HEADLESS)
+    if (PROGRAM_RUNS > 1) {
+        fprintf(stderr, "\n[PAC-MAN] Ejecutando %d partidas x %d ops/hilo — %s\n",
+                PROGRAM_RUNS, STRESS_OPS, case_path);
+        fflush(stderr);
+    }
+#endif
 
     for (int run = 1; run <= PROGRAM_RUNS; run++) {
+#if defined(MODO_GRAFICO_SDL) || defined(HEADLESS)
+        if (PROGRAM_RUNS > 1) {
+            fprintf(stderr, "  [%3d/%d] ejecutando...\r", run, PROGRAM_RUNS);
+            fflush(stderr);
+        }
+#endif
         shm->global_tick = 0; shm->max_ticks = MAX_TICKS;
         shm->game_over = 0; shm->pacman_score = 0; shm->pacman_lives = 3; shm->sim_time_ms = 0.0;
         shm->stress_counter = 0;
+        shm->expected_stress_ops = 0;
         shm->render_errors = 0;
         shm->just_died = 0; shm->death_count = 0; shm->pacman_history[0] = '\0';
         shm->kill_feed_count = 0;
@@ -347,48 +370,120 @@ int main(int argc, char *argv[]) {
         shm->sim_time_ms = elapsed_ms;
         total_elapsed_ms += elapsed_ms;
 
+        // Etapa 1: esperar P1 y P2, luego capturar métricas para que P3
+        // pueda leerlas desde su menú VISUAL antes de que salga.
         waitpid(pid_p1, NULL, 0); waitpid(pid_p2, NULL, 0);
-        
+
         struct rusage ru_ch, ru_self;
         getrusage(RUSAGE_CHILDREN, &ru_ch);
         getrusage(RUSAGE_SELF, &ru_self);
         shm->wall_clock_s = elapsed_ms / 1000.0;
         shm->user_cpu_s = (ru_ch.ru_utime.tv_sec + ru_ch.ru_utime.tv_usec/1e6) + (ru_self.ru_utime.tv_sec + ru_self.ru_utime.tv_usec/1e6);
         shm->sys_cpu_s = (ru_ch.ru_stime.tv_sec + ru_ch.ru_stime.tv_usec/1e6) + (ru_self.ru_stime.tv_sec + ru_self.ru_stime.tv_usec/1e6);
-        shm->max_rss_kb = (ru_ch.ru_maxrss > ru_self.ru_maxrss) ? ru_ch.ru_maxrss : ru_self.ru_maxrss;
         shm->vol_context_switches = ru_ch.ru_nvcsw + ru_self.ru_nvcsw;
         shm->invol_context_switches = ru_ch.ru_nivcsw + ru_self.ru_nivcsw;
-        shm->expected_stress_ops = 6000000LL;
+        shm->p0_rss_kb = ru_self.ru_maxrss;
+        max_proc_name = "P0 Planificador";
+        max_proc_rss = shm->p0_rss_kb;
+        if (shm->p1_rss_kb > max_proc_rss) { max_proc_rss = shm->p1_rss_kb; max_proc_name = "P1 Pac-Man"; }
+        if (shm->p2_rss_kb > max_proc_rss) { max_proc_rss = shm->p2_rss_kb; max_proc_name = "P2 Enemigos"; }
+        shm->max_rss_kb = max_proc_rss;
+        mem_total_kb = shm->p0_rss_kb + shm->p1_rss_kb + shm->p2_rss_kb
+                       - 2 * (long)(sizeof(SharedMemory) / 1024);
+        if (mem_total_kb < max_proc_rss) mem_total_kb = max_proc_rss;
 
+        // Etapa 2: esperar P3 (puede estar en menú VISUAL leyendo shm)
+        // y luego actualizar métricas con su contribución.
         waitpid(pid_p3, NULL, 0);
 
+        getrusage(RUSAGE_CHILDREN, &ru_ch);
+        getrusage(RUSAGE_SELF, &ru_self);
+        shm->user_cpu_s = (ru_ch.ru_utime.tv_sec + ru_ch.ru_utime.tv_usec/1e6) + (ru_self.ru_utime.tv_sec + ru_self.ru_utime.tv_usec/1e6);
+        shm->sys_cpu_s = (ru_ch.ru_stime.tv_sec + ru_ch.ru_stime.tv_usec/1e6) + (ru_self.ru_stime.tv_sec + ru_self.ru_stime.tv_usec/1e6);
+        shm->vol_context_switches = ru_ch.ru_nvcsw + ru_self.ru_nvcsw;
+        shm->invol_context_switches = ru_ch.ru_nivcsw + ru_self.ru_nivcsw;
+        if (shm->p3_rss_kb > max_proc_rss) { max_proc_rss = shm->p3_rss_kb; max_proc_name = "P3 Renderizador"; }
+        shm->max_rss_kb = max_proc_rss;
+        mem_total_kb = shm->p0_rss_kb + shm->p1_rss_kb + shm->p2_rss_kb + shm->p3_rss_kb
+                       - 3 * (long)(sizeof(SharedMemory) / 1024);
+        if (mem_total_kb < max_proc_rss) mem_total_kb = max_proc_rss;
+
         total_stress_ops += shm->stress_counter;
+        total_expected_ops += shm->expected_stress_ops;
         total_render_errors += shm->render_errors;
         if (shm->game_over) successful_runs++;
 
+#if defined(MODO_GRAFICO_SDL) || defined(HEADLESS)
+        if (PROGRAM_RUNS > 1) {
+            fprintf(stderr, "  [%3d/%d] OK  (%.0f ms)\n", run, PROGRAM_RUNS, shm->sim_time_ms);
+            fflush(stderr);
+        }
+#endif
+
         if (PROGRAM_RUNS == 1) {
-            char time_buf[2048];
+            double integridad_pct = (shm->expected_stress_ops > 0
+                ? (double)shm->stress_counter / shm->expected_stress_ops * 100.0
+                : 0.0);
+            long ctx_total = shm->vol_context_switches + shm->invol_context_switches;
+            double vol_ratio_pct = (ctx_total > 0
+                ? (double)shm->vol_context_switches / ctx_total * 100.0
+                : 0.0);
+            double coord_cost = (shm->expected_stress_ops > 0
+                ? (double)shm->vol_context_switches / shm->expected_stress_ops
+                : 0.0);
+            double kernel_per_ctx = (shm->vol_context_switches > 0
+                ? shm->sys_cpu_s / shm->vol_context_switches
+                : 0.0);
+            double throughput_ops_s = (shm->wall_clock_s > 0
+                ? (double)shm->stress_counter / shm->wall_clock_s
+                : 0.0);
+            double ratio_parallelismo = (shm->wall_clock_s > 0
+                ? shm->user_cpu_s / shm->wall_clock_s
+                : 0.0);
+            char time_buf[4096];
             snprintf(time_buf, sizeof(time_buf),
                 "\n=====================================================================\n"
-                "🏆  MÉTRICAS OFICIALES DE RENDIMIENTO (TABLA FINAL)\n"
+                "   METRICAS OFICIALES DE RENDIMIENTO (TABLA FINAL)\n"
                 "=====================================================================\n"
-                "1. Tiempo Interno de Simulación (ms) : %.2f ms\n"
-                "2. Tiempo Real Total / Wall Clock (s): %.4f s\n"
-                "3. Tiempo CPU Modo Usuario (s)       : %.4f s\n"
-                "4. Tiempo CPU Modo Kernel (s)        : %.4f s\n"
-                "5. Consumo Máximo Memoria RAM (RSS)  : %ld KB\n"
-                "6. Cambios Contexto Voluntarios      : %ld\n"
-                "7. Cambios Contexto Involuntarios    : %ld\n"
-                "8. Integridad Datos (Ops procesadas) : %lld / %lld (%.1f%%)\n"
-                "9. Fallos de Renderizado Detectados  : %lld frames\n"
+                "1.  Tiempo Interno de Simulacion        : %.2f ms\n"
+                "2.  Tiempo Real Total (Wall Clock)      : %.4f s\n"
+                "3.  CPU Modo Usuario                    : %.4f s\n"
+                "4.  CPU Modo Kernel                     : %.4f s\n"
+                "5.  RAM Pico P0 Planificador            : %ld KB\n"
+                "6.  RAM Pico P1 Pac-Man                 : %ld KB\n"
+                "7.  RAM Pico P2 Enemigos                : %ld KB\n"
+                "8.  RAM Pico P3 Renderizador            : %ld KB\n"
+                "9.  Proceso Mayor Consumo RAM           : %s -- %ld KB\n"
+                "10. Estimacion Total Memoria            : %ld KB\n"
+                "11. Contexto Voluntarios                : %ld\n"
+                "12. Contexto Involuntarios              : %ld\n"
+                "13. Fraccion Coordinacion Voluntaria    : %.2f%%\n"
+                "14. Integridad de Datos (Ops)           : %lld / %lld (%.1f%%)\n"
+                "15. Costo Coordinacion por Operacion    : %.6f ctx/op\n"
+                "16. Tiempo Kernel por Cambio Contexto   : %.6f s/ctx\n"
+                "17. Operaciones por Segundo             : %.0f ops/s\n"
+                "18. Fallos de Renderizado               : %lld frames\n"
+                "19. Ratio de Paralelismo (CPU/Wall)     : %.2fx\n"
                 "=====================================================================\n",
-                shm->sim_time_ms, shm->wall_clock_s, shm->user_cpu_s, shm->sys_cpu_s,
-                shm->max_rss_kb, shm->vol_context_switches, shm->invol_context_switches,
-                (long long)shm->stress_counter, shm->expected_stress_ops,
-                (shm->expected_stress_ops > 0
-                    ? (double)shm->stress_counter / shm->expected_stress_ops * 100.0
-                    : 0.0),
-                shm->render_errors);
+                shm->sim_time_ms,
+                shm->wall_clock_s,
+                shm->user_cpu_s,
+                shm->sys_cpu_s,
+                shm->p0_rss_kb,
+                shm->p1_rss_kb,
+                shm->p2_rss_kb,
+                shm->p3_rss_kb,
+                max_proc_name, max_proc_rss,
+                mem_total_kb,
+                shm->vol_context_switches,
+                shm->invol_context_switches,
+                vol_ratio_pct,
+                (long long)shm->stress_counter, shm->expected_stress_ops, integridad_pct,
+                coord_cost,
+                kernel_per_ctx,
+                throughput_ops_s,
+                shm->render_errors,
+                ratio_parallelismo);
             print_consola(time_buf);
         }
 
@@ -405,21 +500,73 @@ int main(int argc, char *argv[]) {
     }
 
     if (PROGRAM_RUNS > 1) {
-        char sum_buf[1024];
+        double total_wall_s = total_elapsed_ms / 1000.0;
+        double integridad_pct_total = (total_expected_ops > 0
+            ? (double)total_stress_ops / total_expected_ops * 100.0
+            : 0.0);
+        long ctx_total = shm->vol_context_switches + shm->invol_context_switches;
+        double vol_ratio_pct = (ctx_total > 0
+            ? (double)shm->vol_context_switches / ctx_total * 100.0
+            : 0.0);
+        double coord_cost = (total_expected_ops > 0
+            ? (double)shm->vol_context_switches / total_expected_ops
+            : 0.0);
+        double kernel_per_ctx = (shm->vol_context_switches > 0
+            ? shm->sys_cpu_s / shm->vol_context_switches
+            : 0.0);
+        double throughput_ops_s = (total_wall_s > 0
+            ? (double)total_stress_ops / total_wall_s
+            : 0.0);
+        double ratio_parallelismo = (total_wall_s > 0
+            ? shm->user_cpu_s / total_wall_s
+            : 0.0);
+        char sum_buf[4096];
         snprintf(sum_buf, sizeof(sum_buf),
             "\n=====================================================================\n"
-            "⏰ RESULTADO PRUEBA DE ESTRÉS INTEGRADA (%d Ejecuciones x 100,000 Iteraciones)\n"
-            "Ejecuciones completadas exitosamente : %d/%d\n"
-            "Tiempo acumulado total               : %.2f ms\n"
-            "Operaciones de estrés registradas    : %lld / %lld (%.1f%%)\n"
-            "Fallos de renderizado acumulados     : %lld frames\n"
+            "   RESULTADO ACUMULADO (%d Ejecuciones x %d Iteraciones por Hilo)\n"
+            "Ejecuciones completadas             : %d/%d\n"
+            "=====================================================================\n"
+            "1.  Tiempo Interno de Simulacion        : %.2f ms\n"
+            "2.  Tiempo Real Total (Wall Clock)      : %.4f s\n"
+            "3.  CPU Modo Usuario                    : %.4f s\n"
+            "4.  CPU Modo Kernel                     : %.4f s\n"
+            "5.  RAM Pico P0 Planificador            : %ld KB\n"
+            "6.  RAM Pico P1 Pac-Man                 : %ld KB\n"
+            "7.  RAM Pico P2 Enemigos                : %ld KB\n"
+            "8.  RAM Pico P3 Renderizador            : %ld KB\n"
+            "9.  Proceso Mayor Consumo RAM           : %s -- %ld KB\n"
+            "10. Estimacion Total Memoria            : %ld KB\n"
+            "11. Contexto Voluntarios                : %ld\n"
+            "12. Contexto Involuntarios              : %ld\n"
+            "13. Fraccion Coordinacion Voluntaria    : %.2f%%\n"
+            "14. Integridad de Datos (total)         : %lld / %lld (%.1f%%)\n"
+            "15. Costo Coordinacion por Operacion    : %.6f ctx/op\n"
+            "16. Tiempo Kernel por Cambio Contexto   : %.6f s/ctx\n"
+            "17. Operaciones por Segundo             : %.0f ops/s\n"
+            "18. Fallos de Renderizado               : %lld frames\n"
+            "19. Ratio de Paralelismo (CPU/Wall)     : %.2fx\n"
             "=====================================================================\n",
-            PROGRAM_RUNS, successful_runs, PROGRAM_RUNS, total_elapsed_ms,
-            total_stress_ops, (long long)PROGRAM_RUNS * shm->expected_stress_ops,
-            (shm->expected_stress_ops > 0
-                ? (double)total_stress_ops / ((double)PROGRAM_RUNS * shm->expected_stress_ops) * 100.0
-                : 0.0),
-            total_render_errors);
+            PROGRAM_RUNS, STRESS_OPS,
+            successful_runs, PROGRAM_RUNS,
+            total_elapsed_ms,
+            total_wall_s,
+            shm->user_cpu_s,
+            shm->sys_cpu_s,
+            shm->p0_rss_kb,
+            shm->p1_rss_kb,
+            shm->p2_rss_kb,
+            shm->p3_rss_kb,
+            max_proc_name, max_proc_rss,
+            mem_total_kb,
+            shm->vol_context_switches,
+            shm->invol_context_switches,
+            vol_ratio_pct,
+            total_stress_ops, total_expected_ops, integridad_pct_total,
+            coord_cost,
+            kernel_per_ctx,
+            throughput_ops_s,
+            total_render_errors,
+            ratio_parallelismo);
         print_consola(sum_buf);
     }
 
