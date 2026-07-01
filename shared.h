@@ -18,7 +18,9 @@
 
 #define MAX_TICKS 38
 #define SHM_NAME "/pacman_shm_game"
-#define TICK_DELAY_MS 500 
+#ifndef TICK_DELAY_MS
+#define TICK_DELAY_MS 0
+#endif
 // =========================================================================
 // INTERRUPTORES MANUALES PARA PRUEBAS Y BENCHMARKS (TESTS 2 al 9)
 // Por defecto están comentados con "//" para ejecutar el CASO IDEAL (Test 1).
@@ -35,18 +37,12 @@
 // #define HEADLESS              // Test 10/11: Modo sin renderizado visual
 // #define ENABLE_POWER_PELLETS  // Test 12: Habilitar píldoras de poder (caso4)
 
-#define STRESS_OPS 100000
-
-#ifdef STRESS_TEST
-    #ifndef HEADLESS
-        #define HEADLESS
-    #endif
-    #undef TICK_DELAY_MS
-    #define TICK_DELAY_MS 0
-    #define PROGRAM_RUNS 100
-#else
+#ifdef VISUAL
     #define PROGRAM_RUNS 1
+#else
+    #define PROGRAM_RUNS 100
 #endif
+#define STRESS_OPS 500000
 
 #ifndef BUFFER_SIZE
 #define BUFFER_SIZE 5
@@ -141,7 +137,11 @@ typedef struct {
     volatile long long stress_counter;
     long long expected_stress_ops;
     volatile long long render_errors;
-    
+    long p0_rss_kb;
+    long p1_rss_kb;
+    long p2_rss_kb;
+    long p3_rss_kb;
+
     sem_t sem_tick_start, sem_scheduler_start, sem_signal_start, sem_pacman_turn, sem_enemy_turn;
     sem_t sem_turn_finished, sem_check_collision, sem_collision_checked, sem_renderer_turn, sem_renderer_done;
     sem_t sem_ready_done; 

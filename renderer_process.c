@@ -61,6 +61,10 @@ int main() {
 #endif
 
 #ifdef MODO_GRAFICO_SDL
+#ifndef VISUAL
+    setenv("SDL_VIDEODRIVER", "offscreen", 1);
+    freopen("/dev/null", "w", stderr);
+#endif
     SDL_Init(SDL_INIT_VIDEO);
     IMG_Init(IMG_INIT_PNG);
     if(TTF_Init() == -1) { printf("Error inicializando TTF: %s\n", TTF_GetError()); }
@@ -190,6 +194,9 @@ int main() {
 #ifndef MODO_GRAFICO_SDL
     static char last_ansi_frame[65536] = "";
 #endif
+    int prev_px = -1, prev_py = -1;
+    int prev_gx[4] = {-1,-1,-1,-1}, prev_gy[4] = {-1,-1,-1,-1};
+    int first_frame = 1, prev_was_dying = 0;
     int over = 0;
     while (1) {
         sem_wait(&shm->sem_renderer_turn);
@@ -246,12 +253,14 @@ int main() {
         for(int i = 0; i < 4; i++) { gx[i] = shm->ghost_x[i]; gy[i] = shm->ghost_y[i]; }
         pthread_mutex_unlock(&shm->mutex_ghost_state);
 
-        {
-            int fc = (px < 0 || px >= shm->map_width || py < 0 || py >= shm->map_height);
+        if (!first_frame && !prev_was_dying) {
+            if (abs(px - prev_px) > 1 || abs(py - prev_py) > 1) shm->render_errors++;
             for (int i = 0; i < 4; i++)
-                if (gx[i] < 0 || gx[i] >= shm->map_width || gy[i] < 0 || gy[i] >= shm->map_height) fc = 1;
-            if (fc) shm->render_errors++;
+                if (abs(gx[i] - prev_gx[i]) > 1 || abs(gy[i] - prev_gy[i]) > 1) shm->render_errors++;
         }
+        prev_px = px; prev_py = py;
+        for (int i = 0; i < 4; i++) { prev_gx[i] = gx[i]; prev_gy[i] = gy[i]; }
+        first_frame = 0; prev_was_dying = is_dying;
 
         if (px > px_old) pacman_direction = 0;
         else if (px < px_old) pacman_direction = 1;
@@ -477,12 +486,14 @@ int main() {
         }
         pthread_mutex_unlock(&shm->mutex_ghost_state);
 
-        {
-            int fc = (px < 0 || px >= shm->map_width || py < 0 || py >= shm->map_height);
+        if (!first_frame && !prev_was_dying) {
+            if (abs(px - prev_px) > 1 || abs(py - prev_py) > 1) shm->render_errors++;
             for (int i = 0; i < 4; i++)
-                if (gx[i] < 0 || gx[i] >= shm->map_width || gy[i] < 0 || gy[i] >= shm->map_height) fc = 1;
-            if (fc) shm->render_errors++;
+                if (abs(gx[i] - prev_gx[i]) > 1 || abs(gy[i] - prev_gy[i]) > 1) shm->render_errors++;
         }
+        prev_px = px; prev_py = py;
+        for (int i = 0; i < 4; i++) { prev_gx[i] = gx[i]; prev_gy[i] = gy[i]; }
+        first_frame = 0; prev_was_dying = is_dying;
 
         if(px >= 0 && py >= 0) display[py][px] = 'P';
         for(int i = 0; i < 4; i++) {
@@ -672,9 +683,9 @@ int main() {
     }
     
 #ifdef MODO_GRAFICO_SDL
+#ifdef VISUAL
+    {
     int quit_gui = 0;
-    
-    // Capturamos el estado de salud de Pac-Man para saber cómo terminó el juego
     pthread_mutex_lock(&shm->mutex_game_state);
     int final_lives = shm->pacman_lives;
     pthread_mutex_unlock(&shm->mutex_game_state);
@@ -728,8 +739,10 @@ int main() {
         }
 
         SDL_RenderPresent(renderer);
-        SDL_Delay(50); 
+        SDL_Delay(50);
     }
+    }
+#endif
 
 CLEANUP:
     SDL_DestroyTexture(tex_pac_r); SDL_DestroyTexture(tex_pac_l); 
@@ -747,23 +760,23 @@ CLEANUP:
     IMG_Quit();
     SDL_Quit();
 #else
+#ifdef VISUAL
     int wait_cnt = 0;
     while (shm->sim_time_ms == 0.0 && wait_cnt++ < 100) usleep(1000);
-    
-    char finish_buf[1024];
+
+    char finish_buf[512];
     snprintf(finish_buf, sizeof(finish_buf),
         "\n%s=====================================================================%s\n"
-        "%s🏆 PARTIDA FINALIZADA CON ÉXITO%s\n"
+        "%s   PARTIDA FINALIZADA%s\n"
         "%s=====================================================================%s\n\n"
-        "👉 Presiona %s[M]%s y ENTER para ver la PANTALLA OFICIAL DE 8 MÉTRICAS.\n"
-        "👉 O presiona %s[ENTER]%s directamente para salir a tu terminal WSL...\n",
+        "  Presiona %s[M]%s + ENTER para ver la TABLA DE METRICAS.\n"
+        "  Presiona %s[ENTER]%s para salir a la terminal.\n",
         COLOR_INFO, COLOR_RESET, COLOR_PACMAN, COLOR_RESET, COLOR_INFO, COLOR_RESET,
         COLOR_PACMAN, COLOR_RESET, COLOR_BLINKY, COLOR_RESET);
     output_text(finish_buf);
-    
-#ifndef AUTOMATED_BENCHMARK
+
     if (isatty(STDIN_FILENO)) {
-        int current_screen = 0; // 0 = Mapa, 1 = Métricas
+        int current_screen = 0;
         while (1) {
             fd_set readfds;
             struct timeval tv = { .tv_sec = 10, .tv_usec = 0 };
@@ -771,61 +784,109 @@ CLEANUP:
             FD_SET(STDIN_FILENO, &readfds);
             if (select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv) <= 0) break;
             int ch = getchar();
-            if (ch == '\n' || ch == EOF) {
-                break; // Salir a terminal WSL
-            }
-            if (ch != '\n') { int c; while((c = getchar()) != '\n' && c != EOF); }
-            
+            if (ch == '\n' || ch == EOF) break;
+            if (ch != '\n') { int c; while ((c = getchar()) != '\n' && c != EOF); }
+
             if ((ch == 'M' || ch == 'm') && current_screen == 0) {
                 current_screen = 1;
-                char metrics_buf[4096];
+
+                // Derivadas calculadas aquí (shm ya tiene P0+P1+P2, P3 aún no salió)
+                long ctx_t = shm->vol_context_switches + shm->invol_context_switches;
+                double vol_rat  = ctx_t > 0 ? (double)shm->vol_context_switches / ctx_t * 100.0 : 0.0;
+                double integ    = shm->expected_stress_ops > 0
+                                  ? (double)shm->stress_counter / shm->expected_stress_ops * 100.0 : 0.0;
+                double coord    = shm->expected_stress_ops > 0
+                                  ? (double)shm->vol_context_switches / shm->expected_stress_ops : 0.0;
+                double kper     = shm->vol_context_switches > 0
+                                  ? shm->sys_cpu_s / shm->vol_context_switches : 0.0;
+                double thru     = shm->wall_clock_s > 0
+                                  ? (double)shm->stress_counter / shm->wall_clock_s : 0.0;
+                double ratio_p  = shm->wall_clock_s > 0
+                                  ? shm->user_cpu_s / shm->wall_clock_s : 0.0;
+
+                // Proceso con mayor RSS (sin P3, aún no salió)
+                long m_rss = shm->p0_rss_kb;
+                const char *m_name = "P0 Planificador";
+                if (shm->p1_rss_kb > m_rss) { m_rss = shm->p1_rss_kb; m_name = "P1 Pac-Man"; }
+                if (shm->p2_rss_kb > m_rss) { m_rss = shm->p2_rss_kb; m_name = "P2 Enemigos"; }
+                long m_total = shm->p0_rss_kb + shm->p1_rss_kb + shm->p2_rss_kb
+                               - 2 * (long)(sizeof(SharedMemory) / 1024);
+                if (m_total < m_rss) m_total = m_rss;
+
+                char metrics_buf[8192];
                 snprintf(metrics_buf, sizeof(metrics_buf),
                     "\033[2J\033[H\n"
                     "%s=====================================================================%s\n"
-                    "%s   PANTALLA OFICIAL DE 9 MÉTRICAS DE RENDIMIENTO (RIGOR CIENTÍFICO)  %s\n"
+                    "%s   TABLA OFICIAL DE METRICAS DE RENDIMIENTO (19 METRICAS)%s\n"
                     "%s=====================================================================%s\n\n"
-                    "  %s1. Tiempo Interno de Simulación%s : %.2f ms\n"
-                    "  %s2. Tiempo Real Total (Wall Clock)%s : %.4f s\n"
-                    "  %s3. Tiempo CPU en Modo Usuario%s   : %.4f s\n"
-                    "  %s4. Tiempo CPU en Modo Kernel%s    : %.4f s\n"
-                    "  %s5. Consumo Máximo RAM (RSS)%s     : %ld KB\n"
-                    "  %s6. Cambios Contexto Voluntarios%s : %ld\n"
-                    "  %s7. Cambios Contexto Involuntarios%s : %ld\n"
-                    "  %s8. Integridad de Datos (Ops)%s    : %lld / %lld (%.1f%%)\n"
-                    "  %s9. Fallos de Renderizado%s         : %lld frames\n\n"
+                    "  %s 1. Tiempo Interno de Simulacion%s       : %.2f ms\n"
+                    "  %s 2. Tiempo Real Total (Wall Clock)%s     : %.4f s\n"
+                    "  %s 3. CPU Modo Usuario%s                   : %.4f s\n"
+                    "  %s 4. CPU Modo Kernel%s                    : %.4f s\n"
+                    "  %s 5. RAM Pico P0 Planificador%s           : %ld KB\n"
+                    "  %s 6. RAM Pico P1 Pac-Man%s                : %ld KB\n"
+                    "  %s 7. RAM Pico P2 Enemigos%s               : %ld KB\n"
+                    "  %s 8. RAM Pico P3 Renderizador%s           : (ver en terminal)\n"
+                    "  %s 9. Proceso Mayor Consumo RAM%s          : %s -- %ld KB\n"
+                    "  %s10. Estimacion Total Memoria%s           : %ld KB\n"
+                    "  %s11. Contexto Voluntarios%s               : %ld\n"
+                    "  %s12. Contexto Involuntarios%s             : %ld\n"
+                    "  %s13. Fraccion Coordinacion Voluntaria%s   : %.2f%%\n"
+                    "  %s14. Integridad de Datos (Ops)%s          : %lld / %lld (%.1f%%)\n"
+                    "  %s15. Costo Coordinacion por Operacion%s   : %.6f ctx/op\n"
+                    "  %s16. Tiempo Kernel por Cambio Contexto%s  : %.6f s/ctx\n"
+                    "  %s17. Operaciones por Segundo%s            : %.0f ops/s\n"
+                    "  %s18. Fallos de Renderizado%s              : %lld frames\n"
+                    "  %s19. Ratio de Paralelismo (CPU/Wall)%s    : %.2fx\n\n"
                     "%s=====================================================================%s\n"
-                    "👉 Presiona %s[V]%s y ENTER para Volver a ver el mapa de la partida.\n"
-                    "👉 O presiona %s[ENTER]%s para salir definitivamente a tu terminal WSL...\n",
-                    COLOR_INFO, COLOR_RESET, COLOR_PACMAN, COLOR_RESET, COLOR_INFO, COLOR_RESET,
-                    COLOR_POWER, COLOR_RESET, shm->sim_time_ms,
-                    COLOR_POWER, COLOR_RESET, shm->wall_clock_s,
-                    COLOR_POWER, COLOR_RESET, shm->user_cpu_s,
-                    COLOR_POWER, COLOR_RESET, shm->sys_cpu_s,
-                    COLOR_POWER, COLOR_RESET, shm->max_rss_kb,
-                    COLOR_POWER, COLOR_RESET, shm->vol_context_switches,
-                    COLOR_POWER, COLOR_RESET, shm->invol_context_switches,
-                    COLOR_SUCCESS, COLOR_RESET, (long long)shm->stress_counter, shm->expected_stress_ops,
-                    (shm->expected_stress_ops > 0
-                        ? (double)shm->stress_counter / shm->expected_stress_ops * 100.0
-                        : 0.0),
+                    "  Presiona %s[V]%s + ENTER para volver al mapa de la partida.\n"
+                    "  Presiona %s[ENTER]%s para salir a la terminal.\n",
+                    COLOR_INFO,    COLOR_RESET,
+                    COLOR_PACMAN,  COLOR_RESET,
+                    COLOR_INFO,    COLOR_RESET,
+                    COLOR_POWER,   COLOR_RESET, shm->sim_time_ms,
+                    COLOR_POWER,   COLOR_RESET, shm->wall_clock_s,
+                    COLOR_POWER,   COLOR_RESET, shm->user_cpu_s,
+                    COLOR_POWER,   COLOR_RESET, shm->sys_cpu_s,
+                    COLOR_INFO,    COLOR_RESET, shm->p0_rss_kb,
+                    COLOR_INFO,    COLOR_RESET, shm->p1_rss_kb,
+                    COLOR_INFO,    COLOR_RESET, shm->p2_rss_kb,
+                    COLOR_INFO,    COLOR_RESET,
+                    COLOR_INFO,    COLOR_RESET, m_name, m_rss,
+                    COLOR_INFO,    COLOR_RESET, m_total,
+                    COLOR_SUCCESS, COLOR_RESET, shm->vol_context_switches,
+                    COLOR_SUCCESS, COLOR_RESET, shm->invol_context_switches,
+                    COLOR_SUCCESS, COLOR_RESET, vol_rat,
+                    COLOR_SUCCESS, COLOR_RESET,
+                        (long long)shm->stress_counter, shm->expected_stress_ops, integ,
+                    COLOR_POWER,   COLOR_RESET, coord,
+                    COLOR_POWER,   COLOR_RESET, kper,
+                    COLOR_POWER,   COLOR_RESET, thru,
                     COLOR_SUCCESS, COLOR_RESET, shm->render_errors,
-                    COLOR_INFO, COLOR_RESET,
-                    COLOR_PACMAN, COLOR_RESET, COLOR_BLINKY, COLOR_RESET);
+                    COLOR_POWER,   COLOR_RESET, ratio_p,
+                    COLOR_INFO,    COLOR_RESET,
+                    COLOR_PACMAN,  COLOR_RESET,
+                    COLOR_BLINKY,  COLOR_RESET);
                 output_text(metrics_buf);
+
             } else if ((ch == 'V' || ch == 'v') && current_screen == 1) {
                 current_screen = 0;
+                output_text("\033[2J");      // limpia pantalla antes de redibujar el mapa
                 output_text(last_ansi_frame);
                 output_text(finish_buf);
             } else {
-                break; // Cualquier otra tecla sale
+                break;
             }
         }
     }
 #endif
-    
-    output_text("\033[?1049l"); 
+
+    output_text("\033[?1049l");
 #endif
 
+    struct rusage ru_p3;
+    getrusage(RUSAGE_SELF, &ru_p3);
+    shm->p3_rss_kb = ru_p3.ru_maxrss;
     munmap(shm, sizeof(SharedMemory));
     return 0;
 }

@@ -27,7 +27,12 @@ void* p1_movement_reader(void* arg) {
     (void)arg;
     char filepath[300]; snprintf(filepath, sizeof(filepath), "%s/pacman_moves.txt", case_path);
     FILE *file = fopen(filepath, "r");
-    if (!file) { p1_eof_reached = 1; p1_wake_all(); return NULL; }
+    if (!file) {
+        p1_eof_reached = 1;
+        pthread_cond_broadcast(&p1_cond_not_empty);
+        pthread_cond_broadcast(&p1_cond_not_full);
+        return NULL;
+    }
 
     char line[64];
     while (fgets(line, sizeof(line), file)) {
@@ -46,7 +51,9 @@ void* p1_movement_reader(void* arg) {
     }
     fclose(file);
     pthread_mutex_lock(&p1_mutex_buffer); p1_eof_reached = 1; pthread_mutex_unlock(&p1_mutex_buffer);
-    p1_wake_all(); return NULL;
+    pthread_cond_broadcast(&p1_cond_not_empty);
+    pthread_cond_broadcast(&p1_cond_not_full);
+    return NULL;
 }
 
 void* p1_movement_executor(void* arg) {
@@ -83,7 +90,9 @@ void* p1_movement_executor(void* arg) {
                 pthread_mutex_unlock(&shm->mutex_mailboxes);
 
                 pthread_mutex_lock(&shm->mutex_pacman_state);
-                append_history(shm->pacman_history, cmd, 0); 
+                append_history(shm->pacman_history, cmd, 0);
+                __sync_fetch_and_add(&shm->expected_stress_ops, STRESS_OPS);
+                for(volatile int k=0; k<STRESS_OPS; k++) { shm->stress_counter++; }
                 pthread_mutex_unlock(&shm->mutex_pacman_state);
 
                 sem_post(&shm->sem_turn_finished);
@@ -144,7 +153,8 @@ void* p1_pacman_publisher(void* arg) {
             }
         }
 
-        for(volatile int k=0; k<100000; k++) {
+        __sync_fetch_and_add(&shm->expected_stress_ops, STRESS_OPS);
+        for(volatile int k=0; k<STRESS_OPS; k++) {
             shm->stress_counter++;
         }
 
@@ -180,8 +190,11 @@ int main(int argc, char *argv[]) {
     pthread_mutex_destroy(&p1_mutex_buffer);
     pthread_cond_destroy(&p1_cond_not_empty); 
     pthread_cond_destroy(&p1_cond_not_full);
-    sem_destroy(&p1_sem_publisher_start); 
+    sem_destroy(&p1_sem_publisher_start);
     sem_destroy(&p1_sem_publisher_done);
+    struct rusage ru_p1;
+    getrusage(RUSAGE_SELF, &ru_p1);
+    shm->p1_rss_kb = ru_p1.ru_maxrss;
     munmap(shm, sizeof(SharedMemory));
     
     return 0;

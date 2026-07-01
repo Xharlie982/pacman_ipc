@@ -70,6 +70,8 @@ void* p2_ghost_thread(void* arg) {
                         
                         pthread_mutex_lock(&shm->mutex_ghost_state);
                         append_history(shm->ghost_history[id], cmd, 0);
+                        __sync_fetch_and_add(&shm->expected_stress_ops, STRESS_OPS);
+                        for(volatile int k=0; k<STRESS_OPS; k++) { shm->stress_counter++; }
                         pthread_mutex_unlock(&shm->mutex_ghost_state);
                     } else if (cmd.type != CMD_EOF) {
                         pthread_mutex_lock(&p2_mutex_ghosts);
@@ -92,7 +94,8 @@ void* p2_ghost_thread(void* arg) {
                         // compiten en shm->mutex_ghost_state (compartido). En DISABLE_SYNC
                         // ese mutex se bypasea → race condition real → pérdida de ops visible.
                         pthread_mutex_lock(&shm->mutex_ghost_state);
-                        for(volatile int k=0; k<100000; k++) {
+                        __sync_fetch_and_add(&shm->expected_stress_ops, STRESS_OPS);
+                        for(volatile int k=0; k<STRESS_OPS; k++) {
                             shm->stress_counter++;
                         }
                         pthread_mutex_unlock(&shm->mutex_ghost_state);
@@ -219,6 +222,9 @@ int main(int argc, char *argv[]) {
     pthread_mutex_destroy(&p2_mutex_ghosts); pthread_mutex_destroy(&p2_mutex_local);
     sem_destroy(&p2_sem_tracker_start); sem_destroy(&p2_sem_tracker_done);
     for(int i=0; i<4; i++) { sem_destroy(&p2_sem_ghost_start[i]); sem_destroy(&p2_sem_ghost_done[i]); }
+    struct rusage ru_p2;
+    getrusage(RUSAGE_SELF, &ru_p2);
+    shm->p2_rss_kb = ru_p2.ru_maxrss;
     munmap(shm, sizeof(SharedMemory));
     
     return 0;
