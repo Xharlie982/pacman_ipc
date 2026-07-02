@@ -60,7 +60,7 @@ parse_and_csv() {
 run() {
     log "  → $1"
     case "$CURRENT_TEST" in
-        2|4|15) SDL_VIDEODRIVER=offscreen ./scheduler_process "cases/$1" 2>/dev/null | tee "$TMP_GAME" ;;
+        2|4|15) SDL_VIDEODRIVER=offscreen ./scheduler_process "cases/$1" 2>/dev/tty | tee "$TMP_GAME" ;;
         *)      ./scheduler_process "cases/$1" 2>/dev/null | tee "$TMP_GAME" ;;
     esac
     parse_and_csv "$CURRENT_TEST" "${desc[$CURRENT_TEST]}" "$1"
