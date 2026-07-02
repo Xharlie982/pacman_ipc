@@ -21,21 +21,17 @@
 #ifndef TICK_DELAY_MS
 #define TICK_DELAY_MS 0
 #endif
-// =========================================================================
-// INTERRUPTORES MANUALES PARA PRUEBAS Y BENCHMARKS (TESTS 2 al 9)
-// Por defecto están comentados con "//" para ejecutar el CASO IDEAL (Test 1).
-// Si compilas manualmente, puedes descomentar el que desees probar.
-// =========================================================================
-// #define DISABLE_SYNC          // Test 2: Desactiva mutex (fuerza colisiones)
-// #define ONLY_SEMAPHORES       // Test 3: Sincronización solo semáforos
-// #define ONLY_MUTEX            // Test 4: Sincronización solo mutex
-// #define BUFFER_SIZE 1         // Test 5: Buffer circular tamaño mínimo (1)
-// #define BUFFER_SIZE 20        // Test 6: Buffer circular tamaño grande (20)
-// #define USE_SYSCALL_WRITE     // Test 7: Usar syscall write() en vez de printf()
-// #define GHOSTS_FIRST_PRIORITY // Test 8: Inversión de prioridad (fantasmas primero)
-// #define P0_LOWEST_PRIORITY    // Test 9: Prioridad P0 más baja (P0 < P1 < P2)
-// #define HEADLESS              // Test 10/11: Modo sin renderizado visual
-// #define ENABLE_POWER_PELLETS  // Test 12: Habilitar píldoras de poder (caso4)
+// Macros de control — activar una a la vez vía Makefile (EXTRA_CFLAGS) o descomentar aquí:
+// #define DISABLE_SYNC          // tests 3, 4, 13 — elimina mutex, muestra race conditions
+// #define ONLY_SEMAPHORES       // test 5 — solo semáforos
+// #define ONLY_MUTEX            // test 6 — solo mutex
+// #define BUFFER_SIZE 1         // test 9 — buffer mínimo
+// #define BUFFER_SIZE 20        // test 10 — buffer amplio
+// #define USE_SYSCALL_WRITE     // test 11 — write() en lugar de printf()
+// #define GHOSTS_FIRST_PRIORITY // test 7 — fantasmas con prioridad mayor
+// #define P0_LOWEST_PRIORITY    // test 8 — P0 con prioridad mínima
+// #define HEADLESS              // tests 12, 13 — sin renderizador
+// #define ENABLE_POWER_PELLETS  // tests 14, 15 — habilita caso4
 
 #ifdef VISUAL
     #define PROGRAM_RUNS 1
@@ -113,8 +109,8 @@ typedef struct {
     int ghosts_eaten_combo;
     int ghost_dead_timer[4];
     int ghost_is_scared[4];
-    int ghost_dead_x[4];     // NUEVO: X de la tumba
-    int ghost_dead_y[4];     // NUEVO: Y de la tumba
+    int ghost_dead_x[4];
+    int ghost_dead_y[4];
     int power_pellets[20][20];
 #endif
 

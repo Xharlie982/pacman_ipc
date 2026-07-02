@@ -50,23 +50,14 @@ ipc_benchmark: ipc_benchmark.c
 clean:
 	rm -f $(ALL)
 
-# =========================================================================
-# PARTE 1 — CASO BASE IDEAL
-#   Sincronización completa (mutex + semáforos + variables de condición).
-#   Ejecutar con: ./scheduler_process cases/caso1  (o caso2, caso3)
-# =========================================================================
+# -- Test 1-2: caso base (sync completo, ANSI / SDL2) --
 test1:
 	$(MAKE) clean && $(MAKE)
 
 test2:
 	$(MAKE) clean && $(MAKE) SDL=1
 
-# =========================================================================
-# PARTE 2 — ABLACIÓN DE SINCRONIZACIÓN
-#   Demuestran la necesidad de cada mecanismo de sync.
-#   test3 (ANSI) y test4 (SDL2) muestran race conditions; los errores
-#   gráficos en SDL2 son más espectaculares que en la terminal.
-# =========================================================================
+# -- Tests 3-6: ablación de sincronización --
 test3:
 	$(MAKE) clean && $(MAKE) EXTRA_CFLAGS="-DDISABLE_SYNC"
 
@@ -79,9 +70,7 @@ test5:
 test6:
 	$(MAKE) clean && $(MAKE) EXTRA_CFLAGS="-DONLY_MUTEX"
 
-# =========================================================================
-# PARTE 3 — VARIACIONES DE PLANIFICACIÓN Y CONFIGURACIÓN (ANSI)
-# =========================================================================
+# -- Tests 7-11: prioridad y configuración --
 test7:
 	$(MAKE) clean && $(MAKE) EXTRA_CFLAGS="-DGHOSTS_FIRST_PRIORITY"
 
@@ -97,39 +86,25 @@ test10:
 test11:
 	$(MAKE) clean && $(MAKE) EXTRA_CFLAGS="-DUSE_SYSCALL_WRITE"
 
-# =========================================================================
-# PARTE 4 — VALIDACIÓN SIN RENDERIZADOR (HEADLESS)
-#   Igual que el resto (100 ejecuciones × 400k ops) pero sin P3.
-#   test12: CON sync  → integridad ≈ 100%
-#   test13: SIN sync  → pérdida masiva de datos demostrada
-# =========================================================================
+# -- Tests 12-13: headless (sin P3); test12=sync, test13=race conditions --
 test12:
 	$(MAKE) clean && $(MAKE) EXTRA_CFLAGS="-DHEADLESS"
 
 test13:
 	$(MAKE) clean && $(MAKE) EXTRA_CFLAGS="-DDISABLE_SYNC -DHEADLESS"
 
-# =========================================================================
-# PARTE 5 — BONUS (ENABLE_POWER_PELLETS)
-#   Ejecutar con: ./scheduler_process cases/caso4
-# =========================================================================
+# -- Tests 14-15: power pellets (requiere caso4) --
 test14:
 	$(MAKE) clean && $(MAKE) POWER=1
 
 test15:
 	$(MAKE) clean && $(MAKE) SDL=1 POWER=1
 
-# =========================================================================
-# HERRAMIENTA: BENCHMARK IPC
-#   Solo ejecuta ./ipc_benchmark. Compila el binario si no existe.
-#   No hace make clean — si necesitas recompilar: make clean && make primero.
-# =========================================================================
+# -- Benchmark IPC --
 run_benchmark: ipc_benchmark
 	./ipc_benchmark
 
-# =========================================================================
-# UTILIDADES: ejecutar tests y limpiar resultados
-# =========================================================================
+# -- Utilidades --
 run_tests:
 	chmod +x run_all_tests.sh && ./run_all_tests.sh
 
@@ -137,18 +112,5 @@ run_tests_auto:
 	chmod +x run_all_tests.sh && ./run_all_tests.sh < /dev/null
 
 clean_csv:
-	rm -f resultados_tests.csv
+	rm -f data/resultados_tests.csv
 
-# =========================================================================
-# MEDICIÓN DE TIEMPO (ejecutar manualmente en WSL):
-#   make test12 && time ./scheduler_process cases/caso1
-#   make test12 && time ./scheduler_process cases/caso2
-#   make test12 && time ./scheduler_process cases/caso3
-#
-#   make test13 && time ./scheduler_process cases/caso1
-#   make test13 && time ./scheduler_process cases/caso2
-#   make test13 && time ./scheduler_process cases/caso3
-#
-# Alternativa con /usr/bin/time para output más detallado:
-#   make test12 && /usr/bin/time -v ./scheduler_process cases/caso1
-# =========================================================================

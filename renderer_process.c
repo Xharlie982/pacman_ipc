@@ -1,11 +1,7 @@
 #include "shared.h"
 #include <sys/select.h>
 
-// =========================================================================
-// INTERRUPTOR MANUAL DE SALIDA GRÁFICA (Test 1B)
-// Por defecto está comentado para usar la TERMINAL ANSI (Test 1).
-// Quítale el "//" a la línea inferior (o pasa -DMODO_GRAFICO_SDL) para SDL2.
-// =========================================================================
+// Activar SDL2: descomentar línea siguiente o compilar con -DMODO_GRAFICO_SDL
 //#define MODO_GRAFICO_SDL 
 
 #ifdef MODO_GRAFICO_SDL
@@ -643,8 +639,7 @@ int main() {
                 for(int i=0; i<4; i++) {
 #ifdef ENABLE_POWER_PELLETS
                     if (is_dead[i]) {
-                        // LA LIMPIEZA ANSI APLICADA A RESPAWN BUFFER
-                        rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "%s%s%s: %s[Respawning in %02d tick(s)]%s\033[K\n", c_fant[i], n_fant[i], COLOR_RESET, COLOR_DEAD, shm->ghost_dead_timer[i], COLOR_RESET);
+                            rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "%s%s%s: %s[Respawning in %02d tick(s)]%s\033[K\n", c_fant[i], n_fant[i], COLOR_RESET, COLOR_DEAD, shm->ghost_dead_timer[i], COLOR_RESET);
                     } else {
 #endif
                         rpos += snprintf(respawn_buffer + rpos, sizeof(respawn_buffer) - rpos, "%s%s%s: Active                    \033[K\n", c_fant[i], n_fant[i], COLOR_RESET);
@@ -705,7 +700,6 @@ int main() {
             for(int x = 0; x < shm->map_width; x++) {
                 SDL_Rect rect = { x * TILE_SIZE, y * TILE_SIZE + UI_TOP, TILE_SIZE, TILE_SIZE };
                 if (shm->map_grid[y][x] == 'X') {
-                    // EL FIX: Mantener el color cian/teal del Caso 4
                     if (shm->is_caso4) SDL_SetRenderDrawColor(renderer, 69, 179, 169, 255);
                     else SDL_SetRenderDrawColor(renderer, 25, 25, 166, 255);
                     
@@ -728,7 +722,6 @@ int main() {
             render_text_ttf(renderer, font_small, "6700", win_width - 16, 34, white, 1);
         }
 
-        // EL FIX: GAME OVER vs TIME OUT
         if (font_large) {
             SDL_Color red = {255, 0, 0, 255};
             if (final_lives <= 0) {
@@ -790,7 +783,7 @@ CLEANUP:
             if ((ch == 'M' || ch == 'm') && current_screen == 0) {
                 current_screen = 1;
 
-                // Derivadas calculadas aquí (shm ya tiene P0+P1+P2, P3 aún no salió)
+                // Métricas parciales: P3 aún no salió, se calculan antes de waitpid(p3)
                 long ctx_t = shm->vol_context_switches + shm->invol_context_switches;
                 double vol_rat  = ctx_t > 0 ? (double)shm->vol_context_switches / ctx_t * 100.0 : 0.0;
                 double integ    = shm->expected_stress_ops > 0
@@ -804,7 +797,6 @@ CLEANUP:
                 double ratio_p  = shm->wall_clock_s > 0
                                   ? shm->user_cpu_s / shm->wall_clock_s : 0.0;
 
-                // Proceso con mayor RSS (sin P3, aún no salió)
                 long m_rss = shm->p0_rss_kb;
                 const char *m_name = "P0 Planificador";
                 if (shm->p1_rss_kb > m_rss) { m_rss = shm->p1_rss_kb; m_name = "P1 Pac-Man"; }

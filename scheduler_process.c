@@ -7,14 +7,14 @@
 SharedMemory *shm; char case_path[256];
 
 int check_game_over_safe() {
-    pthread_mutex_lock(&shm->mutex_game_state); // 1. Bloquea el mutex
+    pthread_mutex_lock(&shm->mutex_game_state);
     int go = shm->game_over;
-    pthread_mutex_unlock(&shm->mutex_game_state); // 2. Libera el mutex
+    pthread_mutex_unlock(&shm->mutex_game_state);
     return go;
 }
 
 void p0_wake_all_clean() {
-    sem_post(&shm->sem_tick_start); sem_post(&shm->sem_scheduler_start); // 3. Libera los semáforos
+    sem_post(&shm->sem_tick_start); sem_post(&shm->sem_scheduler_start);
     sem_post(&shm->sem_signal_start); sem_post(&shm->sem_pacman_turn);
     sem_post(&shm->sem_enemy_turn); sem_post(&shm->sem_turn_finished);
     sem_post(&shm->sem_check_collision); sem_post(&shm->sem_collision_checked);
@@ -44,10 +44,10 @@ void pad_and_append_sep(char *hist, int target_len) {
 void* p0_tick_thread(void* arg) {
     (void)arg;
     while(1) {
-        sem_wait(&shm->sem_tick_start); // 2. Espera a que P0 inicie el tick
+        sem_wait(&shm->sem_tick_start);
         if (check_game_over_safe()) { p0_wake_all_clean(); break; }
 
-        pthread_mutex_lock(&shm->mutex_game_state); // 1. Bloquea el mutex
+        pthread_mutex_lock(&shm->mutex_game_state);
         int all_eof = shm->pacman_eof;
         for(int i=0; i<4; i++) all_eof &= shm->ghost_eof[i];
         
@@ -63,7 +63,6 @@ void* p0_tick_thread(void* arg) {
                 shm->ghost_dead_timer[i]--;
                 if (shm->ghost_dead_timer[i] == 0) {
                     shm->ghost_is_scared[i] = 0;
-                    // NUEVO: Desaparece la cruz al revivir
                     shm->tombstones[shm->ghost_dead_y[i]][shm->ghost_dead_x[i]] = 0; 
                 }
             }
@@ -71,12 +70,12 @@ void* p0_tick_thread(void* arg) {
 #endif
 
         if (shm->global_tick >= shm->max_ticks || shm->pacman_lives <= 0 || all_eof) {
-            shm->game_over = 1; pthread_mutex_unlock(&shm->mutex_game_state); // 2. Libera el mutex
+            shm->game_over = 1; pthread_mutex_unlock(&shm->mutex_game_state);
             p0_wake_all_clean(); break;
         }
         shm->global_tick++;
         pthread_mutex_unlock(&shm->mutex_game_state);
-        sem_post(&shm->sem_scheduler_start); // 3. Libera el semáforo
+        sem_post(&shm->sem_scheduler_start);
     }
     return NULL;
 }
@@ -84,10 +83,10 @@ void* p0_tick_thread(void* arg) {
 void* p0_scheduler_thread(void* arg) {
     (void)arg;
     while(1) {
-        sem_wait(&shm->sem_scheduler_start); // 1. Espera a que P0 inicie el tick
+        sem_wait(&shm->sem_scheduler_start);
         if (check_game_over_safe()) { p0_wake_all_clean(); break; }
 
-        pthread_mutex_lock(&shm->mutex_mailboxes); // 2. Bloquea el mutex
+        pthread_mutex_lock(&shm->mutex_mailboxes);
         if (shm->pacman_priority_request_active) { 
             if (shm->use_dynamic_priority) shm->pacman_priority = shm->pending_pacman_priority; 
             shm->pacman_priority_request_active = 0; 
@@ -96,9 +95,9 @@ void* p0_scheduler_thread(void* arg) {
             if (shm->use_dynamic_priority) shm->enemy_priority = shm->pending_enemy_priority; 
             shm->enemy_priority_request_active = 0; 
         }
-        pthread_mutex_unlock(&shm->mutex_mailboxes); // 3. Libera el mutex
+        pthread_mutex_unlock(&shm->mutex_mailboxes);
 
-        pthread_mutex_lock(&shm->mutex_game_state); // 2. Bloquea el mutex
+        pthread_mutex_lock(&shm->mutex_game_state);
         if (shm->pacman_priority > shm->enemy_priority) {
             shm->current_turn = 1; shm->last_played_process = 1;
         } else if (shm->pacman_priority < shm->enemy_priority) {
@@ -107,8 +106,8 @@ void* p0_scheduler_thread(void* arg) {
             shm->current_turn = (shm->last_played_process == 2) ? 1 : 2;
             shm->last_played_process = shm->current_turn;
         }
-        pthread_mutex_unlock(&shm->mutex_game_state); // 3. Libera el mutex
-        sem_post(&shm->sem_signal_start); // 4. Libera el semáforo
+        pthread_mutex_unlock(&shm->mutex_game_state);
+        sem_post(&shm->sem_signal_start);
     }
     return NULL;
 }
@@ -116,29 +115,29 @@ void* p0_scheduler_thread(void* arg) {
 void* p0_signal_thread(void* arg) {
     (void)arg;
     while(1) {
-        sem_wait(&shm->sem_signal_start); // 1. Espera a que P0 inicie el tick
+        sem_wait(&shm->sem_signal_start);
         if (check_game_over_safe()) { p0_wake_all_clean(); break; }
 
-        pthread_mutex_lock(&shm->mutex_game_state); // 2. Bloquea el mutex
+        pthread_mutex_lock(&shm->mutex_game_state);
         int turn = shm->current_turn;
-        pthread_mutex_unlock(&shm->mutex_game_state); // 3. Libera el mutex
+        pthread_mutex_unlock(&shm->mutex_game_state);
 
         if (turn == 1) {
             sem_post(&shm->sem_pacman_turn);
         } else {
             sem_post(&shm->sem_enemy_turn);
         }
-        sem_wait(&shm->sem_turn_finished); // 1. Espera a que P0 inicie el tick
+        sem_wait(&shm->sem_turn_finished);
         if (check_game_over_safe()) { p0_wake_all_clean(); break; }
 
-        sem_post(&shm->sem_check_collision); // 4. Libera el semáforo
-        sem_wait(&shm->sem_collision_checked); // 1. Espera a que P0 inicie el tick
+        sem_post(&shm->sem_check_collision);
+        sem_wait(&shm->sem_collision_checked);
 
-        pthread_mutex_lock(&shm->mutex_collisions); // 2. Bloquea el mutex
+        pthread_mutex_lock(&shm->mutex_collisions);
         if (shm->collision_detected) {
             shm->collision_detected = 0;
             
-            pthread_mutex_lock(&shm->mutex_game_state); // 3. Bloquea el mutex
+            pthread_mutex_lock(&shm->mutex_game_state);
             int gid = shm->collision_ghost_id;
             char const *colors[] = {COLOR_BLINKY, COLOR_PINKY, COLOR_INKY, COLOR_CLYDE};
             char const *names[] = {"Blinky", "Pinky", "Inky", "Clyde"}; 
@@ -148,19 +147,17 @@ void* p0_signal_thread(void* arg) {
                 shm->ghosts_eaten_combo++;
                 shm->pacman_score += 100 * (1 << shm->ghosts_eaten_combo); 
                 
-                // Reducimos a 9 (8 ticks reales) para verlos revivir
                 shm->ghost_dead_timer[gid] = 9; 
                 shm->ghost_is_scared[gid] = 0; 
                 
-                // Guardamos dónde está la cruz
                 shm->ghost_dead_x[gid] = shm->ghost_x[gid];
                 shm->ghost_dead_y[gid] = shm->ghost_y[gid];
                 shm->tombstones[shm->ghost_y[gid]][shm->ghost_x[gid]] = 1;
                 
-                pthread_mutex_lock(&shm->mutex_ghost_state); // 4. Bloquea el mutex
+                pthread_mutex_lock(&shm->mutex_ghost_state);
                 shm->ghost_x[gid] = shm->ghost_init_x[gid]; shm->ghost_y[gid] = shm->ghost_init_y[gid];
                 shm->ghost_old_x[gid] = shm->ghost_init_x[gid]; shm->ghost_old_y[gid] = shm->ghost_init_y[gid];
-                pthread_mutex_unlock(&shm->mutex_ghost_state); // 5. Libera el mutex
+                pthread_mutex_unlock(&shm->mutex_ghost_state);
                 
                 int k_idx = shm->kill_feed_count % 4;
                 snprintf(shm->kill_feed[k_idx].name, sizeof(shm->kill_feed[k_idx].name), "%s%s%s by %sPac-Man%s", colors[gid], names[gid], COLOR_RESET, COLOR_PACMAN, COLOR_RESET);
@@ -183,15 +180,15 @@ void* p0_signal_thread(void* arg) {
 #ifdef ENABLE_POWER_PELLETS
             }
 #endif
-            pthread_mutex_unlock(&shm->mutex_game_state); // 4. Libera el mutex
+            pthread_mutex_unlock(&shm->mutex_game_state);
         }
-        pthread_mutex_unlock(&shm->mutex_collisions); // 3. Libera el mutex
+        pthread_mutex_unlock(&shm->mutex_collisions);
 
         if (check_game_over_safe()) { p0_wake_all_clean(); break; }
         
-        sem_post(&shm->sem_renderer_turn); sem_wait(&shm->sem_renderer_done); // 4. Libera el semáforo
+        sem_post(&shm->sem_renderer_turn); sem_wait(&shm->sem_renderer_done);
 
-        pthread_mutex_lock(&shm->mutex_game_state); // 2. Bloquea el mutex
+        pthread_mutex_lock(&shm->mutex_game_state);
         if (shm->just_died) {
             shm->just_died = 0;
             int max_len = get_visible_length(shm->pacman_history);
@@ -199,23 +196,23 @@ void* p0_signal_thread(void* arg) {
                 int l = get_visible_length(shm->ghost_history[i]);
                 if(l > max_len) max_len = l;
             }
-            pthread_mutex_lock(&shm->mutex_pacman_state); // 3. Bloquea el mutex
+            pthread_mutex_lock(&shm->mutex_pacman_state);
             shm->pacman_x = shm->pacman_init_x; shm->pacman_y = shm->pacman_init_y;
             shm->pacman_old_x = shm->pacman_init_x; shm->pacman_old_y = shm->pacman_init_y;
             pad_and_append_sep(shm->pacman_history, max_len);
-            pthread_mutex_unlock(&shm->mutex_pacman_state); // 4. Libera el mutex
+            pthread_mutex_unlock(&shm->mutex_pacman_state);
             
-            pthread_mutex_lock(&shm->mutex_ghost_state); // 3. Bloquea el mutex
+            pthread_mutex_lock(&shm->mutex_ghost_state);
             for(int i=0; i<4; i++) {
                 shm->ghost_x[i] = shm->ghost_init_x[i]; shm->ghost_y[i] = shm->ghost_init_y[i];
                 shm->ghost_old_x[i] = shm->ghost_init_x[i]; shm->ghost_old_y[i] = shm->ghost_init_y[i];
                 pad_and_append_sep(shm->ghost_history[i], max_len);
             }
-            pthread_mutex_unlock(&shm->mutex_ghost_state); // 4. Libera el mutex
+            pthread_mutex_unlock(&shm->mutex_ghost_state);
         }
-        pthread_mutex_unlock(&shm->mutex_game_state); // 3. Libera el mutex
+        pthread_mutex_unlock(&shm->mutex_game_state);
 
-        sem_post(&shm->sem_tick_start); // 4. Libera el semáforo
+        sem_post(&shm->sem_tick_start);
     }
     return NULL;
 }
@@ -258,9 +255,6 @@ void init_map(const char *path) {
 int main(int argc, char *argv[]) {
     if (argc != 2) { printf("Usage: %s <path_to_case>\n", argv[0]); return 1; }
 
-    // =====================================================================
-    // VALIDACIÓN DE DEPENDENCIAS: Requisito de Power Pellets para Caso 4
-    // =====================================================================
     if (strstr(argv[1], "caso4") != NULL) {
 #ifndef ENABLE_POWER_PELLETS
         printf("\n%s[Error de Dependencia]%s El escenario 'caso4' requiere la habilitación de Power Pellets.\n", COLOR_ERROR, COLOR_RESET);
@@ -370,8 +364,7 @@ int main(int argc, char *argv[]) {
         shm->sim_time_ms = elapsed_ms;
         total_elapsed_ms += elapsed_ms;
 
-        // Etapa 1: esperar P1 y P2, luego capturar métricas para que P3
-        // pueda leerlas desde su menú VISUAL antes de que salga.
+        // Captura métricas P0+P1+P2 antes de que P3 salga (P3 las lee en menú VISUAL)
         waitpid(pid_p1, NULL, 0); waitpid(pid_p2, NULL, 0);
 
         struct rusage ru_ch, ru_self;
@@ -392,8 +385,7 @@ int main(int argc, char *argv[]) {
                        - 2 * (long)(sizeof(SharedMemory) / 1024);
         if (mem_total_kb < max_proc_rss) mem_total_kb = max_proc_rss;
 
-        // Etapa 2: esperar P3 (puede estar en menú VISUAL leyendo shm)
-        // y luego actualizar métricas con su contribución.
+        // Actualiza métricas incluyendo P3 tras su salida
         waitpid(pid_p3, NULL, 0);
 
         getrusage(RUSAGE_CHILDREN, &ru_ch);

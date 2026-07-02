@@ -4,10 +4,11 @@
 # Uso automático:  ./run_all_tests.sh < /dev/null   (o: make run_tests_auto)
 # Los tests SDL2 (2, 4, 15) usan SDL_VIDEODRIVER=offscreen para evitar ventanas.
 
-CSV_OUTPUT="resultados_tests.csv"
+CSV_OUTPUT="data/resultados_tests.csv"
 TMP_GAME=$(mktemp)
 CURRENT_TEST=0
 
+mkdir -p data
 echo "test_num,test_desc,caso,sim_time_ms,wall_clock_s,cpu_user_s,cpu_kernel_s,p0_rss_kb,p1_rss_kb,p2_rss_kb,p3_rss_kb,max_rss_proceso,max_rss_kb,mem_total_kb,ctx_vol,ctx_invol,vol_ratio_pct,ops_actual,ops_esperadas,integridad_pct,coord_cost,kernel_per_ctx,throughput_ops_s,render_errors,ratio_parallelismo" > "$CSV_OUTPUT"
 
 log()     { echo "$@"; }
@@ -47,7 +48,6 @@ parse_and_csv() {
 
     local ctx_vol ctx_invol ops_act ops_exp integ_pct
 
-    # Todos los tests usan etiquetas unificadas (RESULTADO ACUMULADO)
     ctx_vol=$(echo   "$out" | grep "Contexto Voluntarios"   | grep -v "Invol" | grep -v "Fraccion" | awk -F': ' '{print $2}' | tr -d ' ')
     ctx_invol=$(echo "$out" | grep "Contexto Involuntarios"                   | awk -F': ' '{print $2}' | tr -d ' ')
     ops_act=$(echo   "$out" | grep "Integridad de Datos"    | grep -oP '\d+(?= /)'   | head -1)

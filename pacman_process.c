@@ -139,7 +139,6 @@ void* p1_pacman_publisher(void* arg) {
                 pthread_mutex_lock(&shm->mutex_game_state);
                 shm->power_ticks_left = 30;
                 shm->ghosts_eaten_combo = 0;
-                // SOLO SE ASUSTAN LOS QUE ESTÁN VIVOS AL MOMENTO DE COMER EL PELLET
                 for(int i=0; i<4; i++) {
                     if (shm->ghost_dead_timer[i] == 0) shm->ghost_is_scared[i] = 1;
                 }

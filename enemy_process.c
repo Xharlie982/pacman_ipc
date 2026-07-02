@@ -90,9 +90,7 @@ void* p2_ghost_thread(void* arg) {
                         append_history(shm->ghost_history[id], cmd, wall_hit);
                         pthread_mutex_unlock(&shm->mutex_ghost_state);
                         pthread_mutex_unlock(&p2_mutex_ghosts);
-                        // Stress loop FUERA de p2_mutex_ghosts (local) → los 4 hilos
-                        // compiten en shm->mutex_ghost_state (compartido). En DISABLE_SYNC
-                        // ese mutex se bypasea → race condition real → pérdida de ops visible.
+                        // mutex_ghost_state es el que DISABLE_SYNC bypassea → race condition observable aquí
                         pthread_mutex_lock(&shm->mutex_ghost_state);
                         __sync_fetch_and_add(&shm->expected_stress_ops, STRESS_OPS);
                         for(volatile int k=0; k<STRESS_OPS; k++) {
@@ -125,9 +123,6 @@ void* p2_tracker_thread(void* arg) {
     return NULL;
 }
 
-// =================================================================
-// EL HILO REPARADO: AHORA IGNORA A LOS FANTASMAS MUERTOS
-// =================================================================
 void* p2_collision_thread(void* arg) {
     (void)arg;
     while (1) {
@@ -147,7 +142,6 @@ void* p2_collision_thread(void* arg) {
 #else
             int is_dead = 0;
 #endif
-            // PROTECCIÓN: Solo evaluamos si el fantasma ESTÁ VIVO
             if (!is_dead) {
                 int gx = shm->ghost_x[i], gy = shm->ghost_y[i], gx_old = shm->ghost_old_x[i], gy_old = shm->ghost_old_y[i];
                 int same_cell = (px == gx && py == gy);

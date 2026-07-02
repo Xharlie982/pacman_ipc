@@ -1,14 +1,20 @@
-# Binarios compilados
+# ── Binarios compilados ──────────────────────────────────────────────
 scheduler_process
 pacman_process
 enemy_process
 renderer_process
 ipc_benchmark
 
-# Configuración local de Claude Code
+# ── Configuración local de Claude Code ───────────────────────────────
 .claude/
 CLAUDE.md
 
-# Archivos de resultados de tests (generados por run_all_tests.sh)
+# ── Carpetas excluidas del repositorio ───────────────────────────────
+/charts/
+/report/
+.venv/
+
+# ── Archivos temporales generados por los tests ──────────────────────
 resultados_tests.txt
-resultados_tests.csv
+*.o
+*.d

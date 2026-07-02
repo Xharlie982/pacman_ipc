@@ -38,7 +38,6 @@ double bench_shm(int quiet) {
 
     pid_t pid = fork();
     if (pid == 0) {
-        // Child
         for (int i = 0; i < NUM_OPS; i++) {
             sem_wait(&shm->sem_p2c);
             volatile int val = shm->value;
@@ -47,7 +46,6 @@ double bench_shm(int quiet) {
         }
         exit(0);
     } else {
-        // Parent
         for (int i = 0; i < NUM_OPS; i++) {
             sem_wait(&shm->sem_c2p);
             shm->value = i;
